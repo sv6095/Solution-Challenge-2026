@@ -11,16 +11,24 @@ function normalizeApiBase(rawBase?: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
 }
 
-const BASE = normalizeApiBase(
-  import.meta.env.VITE_API_URL ?? import.meta.env.VITE_API_BASE_URL ?? "/api",
-);
+const BASE = normalizeApiBase(import.meta.env.VITE_API_URL ?? "/api");
 
 type AuthPersistence = "local" | "session";
 
 const ACCESS_TOKEN_KEY = "access_token";
 const REFRESH_TOKEN_KEY = "refresh_token";
 const USER_ID_KEY = "user_id";
+const DISPLAY_NAME_KEY = "display_name";
 const PERSISTENCE_KEY = "auth_persistence";
+/** `local` = backend JWT from email/password; `firebase` = Firebase ID token (e.g. Google sign-in). */
+const AUTH_KIND_KEY = "auth_kind";
+
+export type AuthKind = "local" | "firebase";
+
+export function getAuthKind(): AuthKind {
+  const v = readStoredValue(AUTH_KIND_KEY).trim().toLowerCase();
+  return v === "firebase" ? "firebase" : "local";
+}
 
 function readStoredValue(key: string): string {
   return sessionStorage.getItem(key) || localStorage.getItem(key) || "";
@@ -46,7 +54,33 @@ export function getRefreshToken(): string {
 }
 
 export function getUserId(): string {
-  return readStoredValue(USER_ID_KEY) || "local-user";
+  return readStoredValue(USER_ID_KEY);
+}
+
+function decodeJwtPayload(token: string): Record<string, unknown> | null {
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64.padEnd(Math.ceil(b64.length / 4) * 4, "=");
+    const json = atob(padded);
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function inferDisplayName(accessToken: string): string {
+  const payload = decodeJwtPayload(accessToken);
+  const byName = String(payload?.name ?? "").trim();
+  if (byName) return byName;
+  const byEmail = String(payload?.email ?? "").trim();
+  if (byEmail) return byEmail.split("@")[0] || byEmail;
+  return "";
+}
+
+export function getDisplayName(): string {
+  return readStoredValue(DISPLAY_NAME_KEY);
 }
 
 export function getAuthPersistence(): AuthPersistence {
@@ -58,13 +92,20 @@ export function storeAuthSession(payload: {
   accessToken: string;
   refreshToken?: string;
   rememberMe?: boolean;
+  authKind?: AuthKind;
+  displayName?: string;
 }): void {
   const persistence: AuthPersistence = payload.rememberMe ? "local" : getAuthPersistence();
   const resolvedPersistence: AuthPersistence = payload.rememberMe === undefined ? persistence : (payload.rememberMe ? "local" : "session");
   writeStoredValue(USER_ID_KEY, payload.userId, resolvedPersistence);
   writeStoredValue(ACCESS_TOKEN_KEY, payload.accessToken, resolvedPersistence);
   writeStoredValue(REFRESH_TOKEN_KEY, payload.refreshToken || getRefreshToken(), resolvedPersistence);
+  const displayName = String(payload.displayName ?? "").trim() || inferDisplayName(payload.accessToken) || getDisplayName();
+  writeStoredValue(DISPLAY_NAME_KEY, displayName, resolvedPersistence);
   writeStoredValue(PERSISTENCE_KEY, resolvedPersistence, resolvedPersistence);
+  const kind: AuthKind =
+    payload.authKind ?? (readStoredValue(AUTH_KIND_KEY) === "firebase" ? "firebase" : "local");
+  writeStoredValue(AUTH_KIND_KEY, kind, resolvedPersistence);
 }
 
 export function clearAuthSession(): void {
@@ -72,16 +113,59 @@ export function clearAuthSession(): void {
     storage.removeItem(ACCESS_TOKEN_KEY);
     storage.removeItem(REFRESH_TOKEN_KEY);
     storage.removeItem(USER_ID_KEY);
+    storage.removeItem(DISPLAY_NAME_KEY);
     storage.removeItem(PERSISTENCE_KEY);
+    storage.removeItem(AUTH_KIND_KEY);
   }
+  void import("firebase/auth").then(({ signOut, getAuth }) => {
+    void import("@/lib/firebase").then(({ getFirebaseApp }) => {
+      const fa = getFirebaseApp();
+      if (fa) void signOut(getAuth(fa)).catch(() => undefined);
+    });
+  });
 }
 
 let refreshPromise: Promise<string | null> | null = null;
+
+function isPublicPath(path: string): boolean {
+  return (
+    path === "/auth/login" ||
+    path === "/auth/register" ||
+    path === "/auth/refresh" ||
+    path === "/auth/google"
+  );
+}
 
 async function refreshAccessToken(): Promise<string | null> {
   if (refreshPromise) return refreshPromise;
 
   refreshPromise = (async () => {
+    if (getAuthKind() === "firebase") {
+      try {
+        const { getFirebaseApp } = await import("@/lib/firebase");
+        const { getAuth } = await import("firebase/auth");
+        const fa = getFirebaseApp();
+        if (!fa) return null;
+        const auth = getAuth(fa);
+        const u = auth.currentUser;
+        if (!u) {
+          clearAuthSession();
+          return null;
+        }
+        const t = await u.getIdToken(true);
+        storeAuthSession({
+          userId: u.uid,
+          accessToken: t,
+          refreshToken: getRefreshToken(),
+          rememberMe: getAuthPersistence() === "local",
+          authKind: "firebase",
+        });
+        return t;
+      } catch {
+        return null;
+      }
+    }
+
     const refreshToken = getRefreshToken();
     if (!refreshToken) return null;
 
@@ -106,6 +190,7 @@ async function refreshAccessToken(): Promise<string | null> {
         accessToken: payload.access_token,
         refreshToken: payload.refresh_token || refreshToken,
         rememberMe: getAuthPersistence() === "local",
+        authKind: "local",
       });
       return payload.access_token;
     } catch {
@@ -121,17 +206,22 @@ async function refreshAccessToken(): Promise<string | null> {
 async function request<T>(path: string, options?: RequestInit, retryOnAuthFailure = true): Promise<T> {
   const userId = getUserId();
   const token = getAccessToken();
+  if (!token && !isPublicPath(path)) {
+    throw new Error("Missing Bearer token. Please sign in again.");
+  }
   const callerHeaders = new Headers(options?.headers);
   const headers = new Headers();
   headers.set("Content-Type", "application/json");
-  headers.set("X-User-Id", userId);
+  if (userId) {
+    headers.set("X-User-Id", userId);
+  }
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
   callerHeaders.forEach((value, key) => {
     headers.set(key, value);
   });
-  if (!headers.has("X-User-Id")) {
+  if (userId && !headers.has("X-User-Id")) {
     headers.set("X-User-Id", userId);
   }
   if (token && !headers.has("Authorization")) {
@@ -145,17 +235,18 @@ async function request<T>(path: string, options?: RequestInit, retryOnAuthFailur
       headers,
     });
   } catch {
+    const isDev = import.meta.env.DEV;
     throw new Error(
-      "Backend unreachable. Start FastAPI on 127.0.0.1:8000 or set VITE_API_URL to a live API base.",
+      isDev
+        ? "Backend unreachable. Start FastAPI on 127.0.0.1:8000 or set VITE_API_URL to a live API base."
+        : "Unable to reach the server. Please try again in a moment.",
     );
   }
   if (
     res.status === 401 &&
     retryOnAuthFailure &&
     path !== "/auth/login" &&
-    path !== "/api/auth/login" &&
-    path !== "/auth/refresh" &&
-    path !== "/api/auth/refresh"
+    path !== "/auth/refresh"
   ) {
     const refreshedToken = await refreshAccessToken();
     if (refreshedToken) {
@@ -586,11 +677,18 @@ export const api = {
   },
   onboarding: {
     complete: (payload: OnboardingCompleteRequest) =>
-      request<{ status: string; user_id: string; updated_at?: string }>("/onboarding/complete", { method: "POST", body: JSON.stringify(payload) }),
-    status: (userId: string) => request<OnboardingStatusResponse>(`/onboarding/status/${encodeURIComponent(userId)}`),
+      request<{ status: string; user_id: string; updated_at?: string }>(
+        "/onboarding/complete",
+        { method: "POST", body: JSON.stringify(payload) },
+      ),
+    status: (userId: string) =>
+      request<OnboardingStatusResponse>(`/onboarding/status/${encodeURIComponent(userId)}`),
   },
   contexts: {
-    get: (userId: string) => request<{ user_id: string; updated_at?: string; context: Record<string, unknown> }>(`/contexts/${encodeURIComponent(userId)}`),
+    get: (userId: string) =>
+      request<{ user_id: string; updated_at?: string; context: Record<string, unknown> }>(
+        `/contexts/${encodeURIComponent(userId)}`,
+      ),
   },
   dashboard: {
     kpis: () => request<KpiSummary>("/dashboard/kpis"),
@@ -784,6 +882,7 @@ export const api = {
     airQuality: () => request<{ data: AirQualityRecord[]; source: string }>("/global/air-quality"),
     minerals: () => request<{ data: CriticalMineral[] }>("/global/minerals"),
     summary: () => request<GlobalSummary>("/global/summary"),
+    dashboardBundle: () => request<GlobalDashboardBundle>("/global/dashboard-bundle"),
     refresh: () => request<{ status: string; message: string }>("/global/refresh", { method: "POST" }),
   },
 };
@@ -891,5 +990,29 @@ export interface GlobalSummary {
   active_fires: number;
   conflict_events: number;
   minerals: CriticalMineral[];
+}
+
+export interface GlobalDashboardBundle {
+  summary: GlobalSummary;
+  hazards: { data: GlobalHazard[]; source: string };
+  earthquakes: { data: Earthquake[]; source: string };
+  conflict: { data: ConflictEvent[]; source: string };
+  gdelt: { data: GdeltEvent[]; source: string };
+  disasters: { data: GdacsAlert[]; source: string };
+  news: { data: NewsArticle[]; source: string };
+  market_quotes: { data: MarketQuote[]; source: string };
+  energy: { data: Record<string, unknown>; source: string };
+  macro: { data: Record<string, MacroSeries>; source: string };
+  chokepoints: { data: ScoredChokepoint[]; source: string };
+  shipping_stress: ShippingStress;
+  shipping_indices: { data: ShippingIndex[] };
+  country_instability: { data: CountryInstability[] };
+  strategic_risk: StrategicRisk;
+  market_implications: MarketImplications;
+  fires: { data: FireDetection[]; source: string };
+  aviation: { data: FlightRecord[]; source: string };
+  air_quality: { data: AirQualityRecord[]; source: string };
+  minerals: { data: CriticalMineral[] };
+  generated_at: string;
 }
 

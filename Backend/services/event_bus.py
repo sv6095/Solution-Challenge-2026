@@ -31,6 +31,7 @@ from typing import Any
 from fastapi import WebSocket, WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
+HEARTBEAT_INTERVAL_SECONDS = 20
 
 
 # ── Connection registry ───────────────────────────────────────────────────────
@@ -167,6 +168,17 @@ async def websocket_handler(ws: WebSocket, tenant_id: str) -> None:
     """
     await ws.accept()
     await register(tenant_id, ws)
+    stop_heartbeat = asyncio.Event()
+
+    async def _heartbeat_loop() -> None:
+        while not stop_heartbeat.is_set():
+            await asyncio.sleep(HEARTBEAT_INTERVAL_SECONDS)
+            try:
+                await ws.send_text(json.dumps({"type": "heartbeat"}))
+            except Exception:
+                break
+
+    heartbeat_task = asyncio.create_task(_heartbeat_loop())
 
     try:
         # Send connection confirmation
@@ -179,30 +191,25 @@ async def websocket_handler(ws: WebSocket, tenant_id: str) -> None:
             },
         }))
 
-        # Keep connection alive and handle client messages
+        # Handle client messages; keepalive is sent by heartbeat task.
         while True:
+            raw = await ws.receive_text()
             try:
-                raw = await asyncio.wait_for(ws.receive_text(), timeout=45)
-                try:
-                    msg = json.loads(raw)
-                    msg_type = msg.get("type", "")
-                    if msg_type == "ping":
-                        await ws.send_text(json.dumps({
-                            "type": "pong",
-                            "payload": {"timestamp": datetime.now(timezone.utc).isoformat()},
-                        }))
-                except (json.JSONDecodeError, AttributeError):
-                    pass
-            except asyncio.TimeoutError:
-                # Send server keepalive ping every 45s
-                try:
-                    await ws.send_text(json.dumps({"type": "heartbeat"}))
-                except Exception:
-                    break
+                msg = json.loads(raw)
+                msg_type = msg.get("type", "")
+                if msg_type == "ping":
+                    await ws.send_text(json.dumps({
+                        "type": "pong",
+                        "payload": {"timestamp": datetime.now(timezone.utc).isoformat()},
+                    }))
+            except (json.JSONDecodeError, AttributeError):
+                pass
 
-    except WebSocketDisconnect:
-        pass
+    except WebSocketDisconnect as exc:
+        logger.info("WS client disconnected: tenant=%s code=%s", tenant_id, getattr(exc, "code", "unknown"))
     except Exception as exc:
         logger.warning("WS error for tenant=%s: %s", tenant_id, exc)
     finally:
+        stop_heartbeat.set()
+        heartbeat_task.cancel()
         await unregister(tenant_id, ws)

@@ -24,7 +24,11 @@ from agents.extended_signal_agent import (
     fetch_social_sentiment,
     fetch_wto_trade_signals,
 )
+<<<<<<< HEAD
 from services.local_store import add_audit, purge_archived_signals, replace_active_signals, DB_PATH
+=======
+from services.firestore_store import add_audit, purge_archived_signals, replace_active_signals
+>>>>>>> bfe10f4a87445827c0dd488317e528db5644ae9e
 from services.secret_manager import get_secret
 
 _scheduler: BackgroundScheduler | None = None
@@ -241,7 +245,7 @@ async def _poll_sources() -> None:
     # incident engine so incidents appear without any user click.
     try:
         from services.incident_engine import incident_engine
-        from services.local_store import upsert_incident, list_incidents
+        from services.firestore_store import upsert_incident, list_incidents
 
         # Build risk-event dicts from the enriched signals
         events: list[dict] = []

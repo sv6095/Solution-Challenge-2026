@@ -4,6 +4,11 @@ import { useNavigate } from "react-router-dom";
 import { Eye, EyeOff } from "lucide-react";
 import { toast } from "@/components/ui/sonner";
 import { api, storeAuthSession } from "@/lib/api";
+import { getFirebaseAuth, hasFirebaseAuthConfig } from "@/lib/firebase";
+import {
+  completeGoogleOAuthSession,
+  firebaseAuthErrorMessage,
+} from "@/lib/firebaseRedirect";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -12,6 +17,7 @@ const LoginPage = () => {
   const [password, setPassword] = useState("");
   const [rememberMe, setRememberMe] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+  const [googleSubmitting, setGoogleSubmitting] = useState(false);
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,7 +33,24 @@ const LoginPage = () => {
         accessToken: res.access_token,
         refreshToken: res.refresh_token,
         rememberMe,
+        authKind: "local",
       });
+      try {
+        const profile = await api.auth.profile(res.user_id);
+        const fullName = String(profile.full_name ?? "").trim();
+        if (fullName) {
+          storeAuthSession({
+            userId: res.user_id,
+            accessToken: res.access_token,
+            refreshToken: res.refresh_token,
+            rememberMe,
+            authKind: "local",
+            displayName: fullName,
+          });
+        }
+      } catch {
+        // Non-blocking: login should succeed even if profile lookup fails.
+      }
       toast.success("Signed in.");
       try {
         const status = await api.onboarding.status(res.user_id);
@@ -39,6 +62,31 @@ const LoginPage = () => {
       toast.error("Sign in failed. Check your credentials.");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const onGoogleSignIn = async () => {
+    if (!hasFirebaseAuthConfig || !getFirebaseAuth()) {
+      toast.error(
+        "Firebase Auth is not configured. Set VITE_FIREBASE_API_KEY, VITE_FIREBASE_AUTH_DOMAIN (e.g. your-project.firebaseapp.com), PROJECT_ID, APP_ID, and redeploy.",
+      );
+      return;
+    }
+
+    setGoogleSubmitting(true);
+    try {
+      const { GoogleAuthProvider, signInWithPopup } = await import("firebase/auth");
+      const auth = getFirebaseAuth()!;
+      const provider = new GoogleAuthProvider();
+      provider.addScope("profile");
+      provider.addScope("email");
+      provider.setCustomParameters({ prompt: "select_account" });
+      const cred = await signInWithPopup(auth, provider);
+      await completeGoogleOAuthSession(cred.user, navigate, { rememberMe });
+    } catch (err) {
+      toast.error(firebaseAuthErrorMessage(err));
+    } finally {
+      setGoogleSubmitting(false);
     }
   };
 
@@ -133,19 +181,44 @@ const LoginPage = () => {
             <div className="flex-1 h-px bg-border" />
           </div>
 
-          <button className="w-full glass-panel py-3 rounded-sm font-medium flex items-center justify-center gap-3 hover:bg-slate-50 transition-colors">
-            <svg width="18" height="18" viewBox="0 0 18 18"><path d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z" fill="#4285F4"/><path d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z" fill="#34A853"/><path d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z" fill="#FBBC05"/><path d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z" fill="#EA4335"/></svg>
-            Google Sign-In
+          <button
+            type="button"
+            onClick={() => void onGoogleSignIn()}
+            disabled={submitting || googleSubmitting}
+            className="w-full glass-panel py-3 rounded-sm font-medium flex items-center justify-center gap-3 hover:bg-slate-50 transition-colors disabled:opacity-60"
+          >
+            <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden>
+              <path
+                d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 01-1.796 2.716v2.259h2.908c1.702-1.567 2.684-3.875 2.684-6.615z"
+                fill="#4285F4"
+              />
+              <path
+                d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 009 18z"
+                fill="#34A853"
+              />
+              <path
+                d="M3.964 10.71A5.41 5.41 0 013.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 000 9c0 1.452.348 2.827.957 4.042l3.007-2.332z"
+                fill="#FBBC05"
+              />
+              <path
+                d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 00.957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58z"
+                fill="#EA4335"
+              />
+            </svg>
+            {googleSubmitting ? "Signing in…" : "Google Sign-In"}
           </button>
 
           <p className="text-center text-body-md text-slate-500 mt-5">
             Access restricted to authorized personnel.
-            <br />Protected by <span className="text-slate-800 font-medium">Praecantator Kinetic Fortress</span> protocols.
+            <br />
+            Protected by <span className="text-slate-800 font-medium">Praecantator Kinetic Fortress</span> protocols.
           </p>
 
           <p className="text-center text-body-md text-slate-600 mt-4">
             Don't have an account?{" "}
-            <Link to="/register" className="text-sentinel hover:underline">Create one</Link>
+            <Link to="/register" className="text-sentinel hover:underline">
+              Create one
+            </Link>
           </p>
         </div>
       </div>

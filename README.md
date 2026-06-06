@@ -17,7 +17,7 @@ Built with React, Vite, and TypeScript, the Frontend provides a tactical command
 * **Componentry & State:** Designed with modularity using `framer-motion` for fluid transitions and `@tanstack/react-query` to maintain a globally synchronized state matching the fast-paced backend telemetry.
 
 ### 2. Backend Engine (`/Backend`)
-The Python-powered FastAPI backend relies on heavily optimized multi-agent workflows (powered by LangGraph) seamlessly interacting with PyTorch Geometric data structures and an event-sourcing SQLite database (which mirrors cloud structures for smooth production readiness).
+The Python-powered FastAPI backend relies on heavily optimized multi-agent workflows (powered by LangGraph) seamlessly interacting with PyTorch Geometric data structures and Firestore-backed event storage.
 * **Multi-Agent Orchestrator:** Agents run sequentially (Signal -> Assessment -> Routing -> RFQ/Audit), simulating OODA loop command execution.
 * **Graph Intelligence:** Replaces tabular row structures with dynamic network simulations. Local supplier nodes are evaluated alongside global catastrophic events dynamically mapping radial impact zones utilizing advanced isolated Spatial/Bounding Box optimizations to prevent runtime memory exhaustion.
 * **Enterprise Security & Tenancy:** Strict Role-Based Access Control (RBAC). A central policy engine segregates datasets ensuring a zero-trust model where data bleed between clients is completely eliminated, whilst allowing safe cross-tenant intelligence utilizing strict DUNS/LEI entity resolution intersections.
@@ -45,8 +45,10 @@ All external actions require stringent transparency and mirror physical operatio
 
 ## 🛠️ Getting Started & Local Development
 
+**Production (Firebase, Render, Vercel, Google sign-in):** step-by-step checklist → [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md). Detailed deploy and troubleshooting → [`docs/DEPLOYMENT_FIREBASE.md`](docs/DEPLOYMENT_FIREBASE.md).
+
 ### Prerequisites
-* Python 3.10+
+* Python 3.11+ (see `Backend/.python-version`; required for current dependency pins)
 * Node.js v18+ (npm or vpm)
 
 ### Launching the Backend

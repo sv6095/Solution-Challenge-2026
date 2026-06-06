@@ -36,9 +36,11 @@ let _tenantId: string | null = null;
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let _reconnectAttempt = 0;
 const MAX_RECONNECT_DELAY = 30_000;
+const CLIENT_PING_INTERVAL_MS = 20_000;
 
 function _getWsUrl(tenantId: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+<<<<<<< HEAD
   const apiBase = import.meta.env.VITE_API_BASE
     || import.meta.env.VITE_API_URL
     || import.meta.env.VITE_API_BASE_URL;
@@ -46,6 +48,13 @@ function _getWsUrl(tenantId: string): string {
   const host = apiBase?.replace(/^https?:\/\//, "") || window.location.host;
   // Strip trailing /api if present
   const cleanHost = host.replace(/\/api\/?$/, "");
+=======
+  const host = (import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_URL ?? "")
+    .replace(/^https?:\/\//, "")
+    || window.location.host;
+  // Strip trailing /api if present, then any trailing slash
+  const cleanHost = host.replace(/\/api\/?$/, "").replace(/\/+$/, "");
+>>>>>>> bfe10f4a87445827c0dd488317e528db5644ae9e
   return `${proto}//${cleanHost}/ws/${tenantId}`;
 }
 
@@ -101,8 +110,11 @@ function _connect(tenantId: string) {
 }
 
 function _scheduleReconnect(tenantId: string) {
+  if (_listeners.size === 0) return;
   if (_reconnectTimer) clearTimeout(_reconnectTimer);
-  const delay = Math.min(1000 * Math.pow(2, _reconnectAttempt), MAX_RECONNECT_DELAY);
+  const baseDelay = Math.min(1000 * Math.pow(2, _reconnectAttempt), MAX_RECONNECT_DELAY);
+  const jitter = Math.floor(Math.random() * 400);
+  const delay = baseDelay + jitter;
   _reconnectAttempt++;
   _reconnectTimer = setTimeout(() => _connect(tenantId), delay);
 }
@@ -151,7 +163,7 @@ export function useWebSocket(tenantId?: string | null) {
     }
 
     // Keepalive ping every 30s
-    const pingInterval = setInterval(_sendPing, 30_000);
+    const pingInterval = setInterval(_sendPing, CLIENT_PING_INTERVAL_MS);
 
     return () => {
       _listeners.delete(handler);

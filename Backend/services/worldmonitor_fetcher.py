@@ -10,7 +10,7 @@ the Praecantator frontend can poll `/global/*` endpoints in real-time.
 Architecture
 ------------
   • APScheduler triggers each fetcher on its own cadence.
-  • Results are stored in SQLite (local dev) / Firestore (production).
+  • Results are stored in Firestore.
   • Every route is independently resilient — failure of one source never
     blocks others.
   • All external API keys come from environment variables matching the
@@ -36,7 +36,7 @@ Data Sources (all free / no-key or free-tier)
     Finnhub          → market quotes
     EIA              → energy prices
     FRED             → macro indicators
-    OpenAQ           → air quality
+    OpenAQ           → air quality (requires OPENAQ_API_KEY on v3)
     AviationStack    → flight data
 
   Tier 2 — Optional / premium:
@@ -48,18 +48,21 @@ import asyncio
 import json
 import logging
 import os
-import sqlite3
 import time
+from threading import Lock
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from google.cloud.firestore_v1.base_query import FieldFilter
+
+from services.firestore_store import _client, _safe_doc_id
 
 logger = logging.getLogger(__name__)
-
-# ── DB path ──────────────────────────────────────────────────────────────────
-
-DB_PATH = os.getenv("LOCAL_DB_PATH", "./local_fallback.db")
+_GDELT_RATE_LIMIT_UNTIL: float = 0.0
+_READ_CACHE_TTL_SECONDS = max(1, int(os.getenv("WORLDMONITOR_READ_CACHE_SECONDS", "30")))
+_READ_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_READ_CACHE_LOCK = Lock()
 
 # ── API keys from environment (worldmonitor conventions) ─────────────────────
 
@@ -118,56 +121,59 @@ CRITICAL_MINERALS = [
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _db_upsert(table: str, key: str, data: Any) -> None:
-    """Store JSON blob keyed by name in worldmonitor_cache table."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        conn.execute(
-            """CREATE TABLE IF NOT EXISTS worldmonitor_cache (
-                key TEXT PRIMARY KEY,
-                table_name TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                fetched_at TEXT NOT NULL
-            )"""
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO worldmonitor_cache (key,table_name,payload,fetched_at) VALUES (?,?,?,?)",
-            (key, table, json.dumps(data, default=str), datetime.now(timezone.utc).isoformat()),
-        )
-        conn.commit()
-    finally:
-        conn.close()
+    """Store JSON payload keyed by name in Firestore."""
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    _client().collection("worldmonitor_cache").document(_safe_doc_id(key)).set({
+        "key": key,
+        "table_name": table,
+        "payload": data,
+        "fetched_at": fetched_at,
+    }, merge=True)
+    # Update hot read cache immediately so callers avoid an extra Firestore read.
+    with _READ_CACHE_LOCK:
+        _READ_CACHE[key] = (time.monotonic() + _READ_CACHE_TTL_SECONDS, {"data": data, "fetched_at": fetched_at})
 
 
 def db_read(key: str) -> Any | None:
     """Read a cached payload. Returns None if not found."""
-    conn = sqlite3.connect(DB_PATH)
+    now = time.monotonic()
+    with _READ_CACHE_LOCK:
+        cached = _READ_CACHE.get(key)
+        if cached and cached[0] > now:
+            return cached[1]
     try:
-        row = conn.execute(
-            "SELECT payload, fetched_at FROM worldmonitor_cache WHERE key=?",
-            (key,),
-        ).fetchone()
-        if not row:
+        doc = _client().collection("worldmonitor_cache").document(_safe_doc_id(key)).get()
+        if not doc.exists:
             return None
-        return {"data": json.loads(row[0]), "fetched_at": row[1]}
+        data = doc.to_dict() or {}
+        payload = {"data": data.get("payload"), "fetched_at": data.get("fetched_at")}
+        with _READ_CACHE_LOCK:
+            _READ_CACHE[key] = (now + _READ_CACHE_TTL_SECONDS, payload)
+        return payload
     except Exception:
         return None
-    finally:
-        conn.close()
 
 
 def db_read_all_by_table(table: str) -> list[dict]:
     """Read all records for a given table name."""
-    conn = sqlite3.connect(DB_PATH)
     try:
-        rows = conn.execute(
-            "SELECT key, payload, fetched_at FROM worldmonitor_cache WHERE table_name=?",
-            (table,),
-        ).fetchall()
-        return [{"key": r[0], "data": json.loads(r[1]), "fetched_at": r[2]} for r in rows]
+        rows = (
+            _client()
+            .collection("worldmonitor_cache")
+            .where(filter=FieldFilter("table_name", "==", table))
+            .stream()
+        )
+        result: list[dict] = []
+        for doc in rows:
+            payload = doc.to_dict() or {}
+            result.append({
+                "key": payload.get("key"),
+                "data": payload.get("payload"),
+                "fetched_at": payload.get("fetched_at"),
+            })
+        return result
     except Exception:
         return []
-    finally:
-        conn.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -175,12 +181,30 @@ def db_read_all_by_table(table: str) -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 async def _safe_get(client: httpx.AsyncClient, url: str, **kwargs) -> dict | list | None:
+    """Fetch JSON; return None on HTTP errors, empty body, or non-JSON payloads."""
     try:
-        resp = await client.get(url, timeout=15, **kwargs)
-        if resp.status_code == 200:
-            return resp.json()
+        resp = await client.get(url, timeout=15, follow_redirects=True, **kwargs)
+        if resp.status_code != 200:
+            logger.warning("[worldmonitor] GET %s HTTP %s", url, resp.status_code)
+            return None
+        raw = (resp.content or b"").strip()
+        if not raw:
+            logger.warning("[worldmonitor] GET %s empty body (status 200)", url)
+            return None
+        try:
+            parsed: dict | list = json.loads(raw)
+            return parsed
+        except json.JSONDecodeError as e:
+            preview = raw[:240].decode("utf-8", errors="replace").replace("\n", " ")
+            logger.warning(
+                "[worldmonitor] GET %s non-JSON (%s); preview: %r",
+                url,
+                e,
+                preview,
+            )
+            return None
     except Exception as e:
-        logger.warning(f"[worldmonitor] GET {url} failed: {e}")
+        logger.warning("[worldmonitor] GET %s failed: %s", url, e)
     return None
 
 
@@ -324,13 +348,34 @@ async def fetch_conflict_events():
 
 async def fetch_gdelt():
     """GDELT — global event database, supply chain relevant."""
+    global _GDELT_RATE_LIMIT_UNTIL
+    now_ts = time.monotonic()
+    if now_ts < _GDELT_RATE_LIMIT_UNTIL:
+        logger.info("[worldmonitor] GDELT skipped: in rate-limit cooldown")
+        return
+
+    # ArtList mode often rejects OR-compound queries with a non-JSON error body; keep a single broad phrase.
     url = (
         "https://api.gdeltproject.org/api/v2/doc/doc?"
-        "query=supply+chain+OR+sanctions+OR+trade+dispute+OR+port+blockade"
-        "&mode=ArtList&maxrecords=50&format=json&timespan=3d"
+        "query=supply+chain"
+        "&mode=ArtList&maxrecords=20&format=json&timespan=24h"
     )
     async with httpx.AsyncClient() as c:
-        data = await _safe_get(c, url)
+        resp = await c.get(url, timeout=15, follow_redirects=True)
+        if resp.status_code == 429:
+            retry_after = int(resp.headers.get("Retry-After") or 1800)
+            _GDELT_RATE_LIMIT_UNTIL = now_ts + max(300, retry_after)
+            logger.warning("[worldmonitor] GDELT rate-limited (429). Cooling down for %ss", max(300, retry_after))
+            return
+        if resp.status_code != 200:
+            logger.warning("[worldmonitor] GDELT HTTP %s", resp.status_code)
+            return
+        try:
+            data = resp.json()
+        except Exception:
+            logger.warning("[worldmonitor] GDELT returned non-JSON payload")
+            return
+
     articles = []
     for art in (data.get("articles") or [] if data else [])[:30]:
         articles.append({
@@ -445,9 +490,11 @@ async def fetch_macro():
 
 async def fetch_air_quality():
     """OpenAQ — air quality for major port cities."""
+    if not OPENAQ_KEY:
+        return
     port_cities = ["Shanghai", "Rotterdam", "Singapore", "Shenzhen", "Dubai", "Houston", "Mumbai", "Lagos"]
     results = []
-    headers = {"X-API-Key": OPENAQ_KEY} if OPENAQ_KEY else {}
+    headers = {"X-API-Key": OPENAQ_KEY}
     async with httpx.AsyncClient(headers=headers) as c:
         for city in port_cities[:5]:
             url = f"https://api.openaq.org/v3/locations?city={city}&limit=1&parameters_id=2"
