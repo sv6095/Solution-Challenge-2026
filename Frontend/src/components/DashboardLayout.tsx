@@ -2,7 +2,7 @@ import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
 import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  Crosshair, Network, AlertTriangle, Radar, Shield,
+  Crosshair, Network, AlertTriangle, Radar, Shield, Globe2,
   Settings, Bell, Menu, ChevronLeft, ShieldAlert, Wifi, WifiOff,
   Send, CheckCircle, LogOut, User, Clock,
 } from "lucide-react";
@@ -33,6 +33,7 @@ function authHeaders(): HeadersInit {
 const NAV_ITEMS = [
   { title: "Command",      icon: Crosshair,     path: "/dashboard",             description: "Live briefing" },
   { title: "Network",      icon: Network,       path: "/dashboard/network",     description: "Supplier graph" },
+  { title: "AR View",      icon: Globe2,        path: "/dashboard/ar-view",     description: "3D globe" },
   { title: "Incidents",    icon: AlertTriangle, path: "/dashboard/incidents",   description: "Auto-analyzed" },
   { title: "Intelligence", icon: Radar,         path: "/dashboard/intelligence", description: "Signals & map" },
   { title: "Compliance",   icon: Shield,        path: "/dashboard/compliance",  description: "Audit & export" },

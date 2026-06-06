@@ -16,6 +16,7 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 // v4 Core Pages
 const CommandCenter = lazy(() => import("@/pages/dashboard/CommandCenter"));
 const NetworkView = lazy(() => import("@/pages/dashboard/NetworkView"));
+const ArView = lazy(() => import("@/pages/dashboard/ArView"));
 const Incidents = lazy(() => import("@/pages/dashboard/Incidents"));
 const IncidentSimulator = lazy(() => import("@/pages/dashboard/IncidentSimulator"));
 const Intelligence = lazy(() => import("@/pages/dashboard/Intelligence"));
@@ -54,6 +55,7 @@ const App = () => (
               {/* ── v4 Core Routes ── */}
               <Route index element={<CommandCenter />} />
               <Route path="network" element={<NetworkView />} />
+              <Route path="ar-view" element={<ArView />} />
               <Route path="incidents" element={<Incidents />} />
               <Route path="incident-simulator" element={<IncidentSimulator />} />
               <Route path="intelligence" element={<Intelligence />} />

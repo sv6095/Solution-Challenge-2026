@@ -509,6 +509,52 @@ export interface NetworkGraphResponse {
   routes: NetworkRoute[];
 }
 
+export interface ArAssetNode {
+  id: string;
+  name: string;
+  type: string;
+  tier?: string;
+  lat: number;
+  lng: number;
+  country?: string;
+  criticality?: string;
+  exposureScore?: number;
+  daily_throughput_usd?: number;
+  transport_modes?: Record<string, boolean>;
+}
+
+export interface ArAssetRoute {
+  id: string;
+  from_node_id: string;
+  to_node_id: string;
+  mode: "sea" | "air" | "land" | string;
+  active: boolean;
+  confidence: number;
+  cost_usd: number;
+  cost_delta_usd: number;
+  co2_delta_kg: number;
+  startLat: number;
+  startLng: number;
+  endLat: number;
+  endLng: number;
+}
+
+export interface ArAssetDisruption {
+  id: string;
+  title: string;
+  severity: string;
+  lat: number;
+  lng: number;
+  radius_km?: number;
+}
+
+export interface ArAssetsResponse {
+  nodes: ArAssetNode[];
+  routes: ArAssetRoute[];
+  disruptions: ArAssetDisruption[];
+  updated_at: string;
+}
+
 export interface WorkflowAnalysisResponse {
   provider: "gemini" | "groq" | "local";
   analysis: string;
@@ -832,6 +878,9 @@ export const api = {
   },
   network: {
     graph: () => request<NetworkGraphResponse>("/network/graph"),
+  },
+  ar: {
+    assets: () => request<ArAssetsResponse>("/ar/assets"),
   },
   workflowNetwork: {
     save: (payload: {

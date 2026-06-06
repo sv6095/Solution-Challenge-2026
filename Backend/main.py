@@ -2509,6 +2509,178 @@ async def api_get_network(user_id: str, user=Depends(verify_firebase_or_local_to
     }
 
 
+def _ar_float(value: Any, default: float = 0.0) -> float:
+    try:
+        n = float(value)
+        return n if -1e12 < n < 1e12 else default
+    except Exception:
+        return default
+
+
+def _ar_transport_mode(raw: Any) -> str:
+    mode = str(raw or "").strip().lower()
+    if mode in {"sea", "ocean", "ship", "maritime"}:
+        return "sea"
+    if mode in {"air", "flight", "aviation"}:
+        return "air"
+    if mode in {"land", "ground", "road", "rail", "truck"}:
+        return "land"
+    return "land"
+
+
+def _ar_route_confidence(route: dict[str, Any], from_node: dict[str, Any] | None, to_node: dict[str, Any] | None) -> float:
+    explicit = route.get("confidence") or route.get("confidence_score") or route.get("reliability")
+    if explicit is not None:
+        return max(0.1, min(1.0, _ar_float(explicit, 0.75)))
+    criticality_penalty = {"critical": 0.2, "high": 0.14, "medium": 0.08, "low": 0.02}
+    route_penalty = 0.06 if route.get("is_primary") is False else 0.0
+    node_penalty = max(
+        criticality_penalty.get(str((from_node or {}).get("criticality") or "").lower(), 0.08),
+        criticality_penalty.get(str((to_node or {}).get("criticality") or "").lower(), 0.08),
+    )
+    return round(max(0.15, min(1.0, 0.92 - node_penalty - route_penalty)), 2)
+
+
+def _ar_node_from_supplier(item: dict[str, Any], idx: int) -> dict[str, Any]:
+    node = _normalized_supplier_row(item, idx)
+    return {
+        "id": node["id"],
+        "name": node["name"],
+        "type": "supplier",
+        "tier": node["tier"],
+        "lat": node["lat"],
+        "lng": node["lng"],
+        "country": node["country"],
+        "criticality": "critical" if node["exposureScore"] >= 75 else "high" if node["exposureScore"] >= 60 else "medium",
+        "exposureScore": node["exposureScore"],
+        "daily_throughput_usd": _ar_float(item.get("daily_throughput_usd"), 100_000),
+        "transport_modes": {"sea": node["mode"] == "sea", "air": node["mode"] == "air", "land": node["mode"] == "land"},
+    }
+
+
+@app.get("/api/ar/assets")
+async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[str, Any]:
+    """
+    Globe-ready supply chain payload for the dashboard AR view.
+    Includes normalized nodes, active routes, route labels, and live disruption rings.
+    """
+    user_id = str(user.get("sub") or "").strip()
+    tenant_id = _resolved_request_tenant(user)
+    ctx = _context_payload_for_user(user_id)
+    network = ctx.get("supply_chain_network") if isinstance(ctx.get("supply_chain_network"), dict) else {}
+
+    raw_nodes = network.get("nodes") if isinstance(network, dict) else []
+    raw_routes = network.get("routes") if isinstance(network, dict) else []
+    nodes: list[dict[str, Any]] = []
+    if isinstance(raw_nodes, list) and raw_nodes:
+        for idx, item in enumerate(raw_nodes):
+            if not isinstance(item, dict):
+                continue
+            nodes.append({
+                "id": str(item.get("id") or f"node_{idx+1}"),
+                "name": str(item.get("name") or item.get("label") or f"Node {idx+1}"),
+                "type": str(item.get("type") or "supplier"),
+                "tier": _parse_tier(item.get("tier") or item.get("type")),
+                "lat": _ar_float(item.get("lat")),
+                "lng": _ar_float(item.get("lng")),
+                "country": str(item.get("country") or ""),
+                "criticality": str(item.get("criticality") or "medium").lower(),
+                "exposureScore": _ar_float(item.get("exposureScore") or item.get("exposure_score"), 50),
+                "daily_throughput_usd": _ar_float(item.get("daily_throughput_usd"), 100_000),
+                "transport_modes": item.get("transport_modes") if isinstance(item.get("transport_modes"), dict) else {"sea": False, "air": False, "land": True},
+            })
+    else:
+        suppliers = ctx.get("suppliers") if isinstance(ctx.get("suppliers"), list) else []
+        nodes = [_ar_node_from_supplier(item, idx) for idx, item in enumerate(suppliers) if isinstance(item, dict)]
+
+    nodes = [n for n in nodes if -90 <= n["lat"] <= 90 and -180 <= n["lng"] <= 180 and not (n["lat"] == 0 and n["lng"] == 0)]
+    by_id = {n["id"]: n for n in nodes}
+
+    routes: list[dict[str, Any]] = []
+    if isinstance(raw_routes, list) and raw_routes:
+        for idx, route in enumerate(raw_routes):
+            if not isinstance(route, dict):
+                continue
+            from_id = str(route.get("from_node_id") or route.get("from") or route.get("source") or "")
+            to_id = str(route.get("to_node_id") or route.get("to") or route.get("target") or "")
+            from_node, to_node = by_id.get(from_id), by_id.get(to_id)
+            if not from_node or not to_node:
+                continue
+            confidence = _ar_route_confidence(route, from_node, to_node)
+            cost = _ar_float(route.get("cost_per_unit_usd") or route.get("cost_usd"), 2000)
+            baseline_cost = _ar_float(route.get("baseline_cost_usd"), cost * 1.08)
+            co2_delta = _ar_float(route.get("co2_delta_kg") or route.get("co2_delta"), 0)
+            routes.append({
+                "id": str(route.get("id") or f"route_{idx+1}"),
+                "from_node_id": from_id,
+                "to_node_id": to_id,
+                "mode": _ar_transport_mode(route.get("mode")),
+                "active": bool(route.get("active", True)),
+                "confidence": confidence,
+                "cost_usd": round(cost, 2),
+                "cost_delta_usd": round(cost - baseline_cost, 2),
+                "co2_delta_kg": round(co2_delta, 2),
+                "startLat": from_node["lat"],
+                "startLng": from_node["lng"],
+                "endLat": to_node["lat"],
+                "endLng": to_node["lng"],
+            })
+    elif len(nodes) > 1:
+        hub = next((n for n in nodes if n["type"] in {"factory", "warehouse", "destination"}), nodes[0])
+        for idx, node in enumerate(nodes):
+            if node["id"] == hub["id"]:
+                continue
+            mode = _ar_transport_mode("air" if abs(node["lng"] - hub["lng"]) > 80 else next((m for m, ok in node["transport_modes"].items() if ok), "land"))
+            routes.append({
+                "id": f"route_{hub['id']}_{node['id']}",
+                "from_node_id": hub["id"],
+                "to_node_id": node["id"],
+                "mode": mode,
+                "active": True,
+                "confidence": round(max(0.2, min(1.0, 1 - (_ar_float(node.get("exposureScore"), 50) / 140))), 2),
+                "cost_usd": round(1200 + idx * 180, 2),
+                "cost_delta_usd": round(-80 + idx * 12, 2),
+                "co2_delta_kg": round((idx % 5 - 2) * 18.5, 2),
+                "startLat": hub["lat"],
+                "startLng": hub["lng"],
+                "endLat": node["lat"],
+                "endLng": node["lng"],
+            })
+
+    active_incidents = [
+        inc for inc in list_incidents(status=None, limit=100, tenant_id=tenant_id)
+        if str(inc.get("status") or "").upper() not in {"RESOLVED", "AUTO_RESOLVED", "DISMISSED"}
+    ]
+    disruptions = []
+    for inc in active_incidents:
+        event_payload = inc.get("event") if isinstance(inc.get("event"), dict) else {}
+        lat = inc.get("lat") or inc.get("event_lat") or event_payload.get("lat")
+        lng = inc.get("lng") or inc.get("event_lng") or event_payload.get("lng")
+        lat_f, lng_f = _ar_float(lat), _ar_float(lng)
+        if lat_f == 0 and lng_f == 0:
+            affected = inc.get("affected_suppliers") if isinstance(inc.get("affected_suppliers"), list) else []
+            match = next((by_id.get(str(s.get("id") or s.get("supplier_id") or "")) for s in affected if isinstance(s, dict)), None)
+            if match:
+                lat_f, lng_f = match["lat"], match["lng"]
+        if lat_f == 0 and lng_f == 0:
+            continue
+        disruptions.append({
+            "id": str(inc.get("id") or inc.get("incident_id") or uuid4()),
+            "title": str(inc.get("event_title") or inc.get("title") or "Active disruption"),
+            "severity": str(inc.get("severity") or "HIGH").upper(),
+            "lat": lat_f,
+            "lng": lng_f,
+            "radius_km": _event_impact_radius_km(inc),
+        })
+
+    return {
+        "nodes": nodes,
+        "routes": routes,
+        "disruptions": disruptions,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.post("/api/workflow/network/monitor")
 async def api_network_monitor(payload: SCNetworkMonitorRequest, user=Depends(verify_firebase_or_local_token)) -> dict:
     """
