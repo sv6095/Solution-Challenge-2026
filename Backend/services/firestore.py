@@ -89,3 +89,39 @@ def write_workflow_outcome(workflow_id: str, payload: dict) -> dict:
 
 def read_workflow_outcomes(limit: int = 200) -> list[dict]:
     return list_workflow_outcomes(limit=limit)
+
+
+if os.getenv("DB_PROVIDER", "firestore").strip().lower() in ("local", "sqlite") or not gcp_project_id():
+    import services.local_store as local_store
+    local_store.init_local_store()
+    
+    globals()["write_context"] = lambda user_id, payload: local_store.upsert_context(user_id, json.dumps(payload))
+    
+    def _read_context_local(user_id: str) -> dict | None:
+        row = local_store.get_context(user_id)
+        if not row:
+            return None
+        data = json.loads(row.get("payload_json") or "{}")
+        if not isinstance(data, dict):
+            data = {}
+        data.setdefault("user_id", user_id)
+        return data
+        
+    globals()["read_context"] = _read_context_local
+    globals()["write_workflow_event"] = local_store.upsert_workflow_event
+    globals()["read_workflow_event"] = local_store.get_workflow_event
+    globals()["persist_reasoning_step"] = lambda workflow_id, step: local_store.insert_reasoning_step(
+        workflow_id,
+        str(step.get("agent") or ""),
+        str(step.get("stage") or ""),
+        str(step.get("detail") or ""),
+        str(step.get("status") or "success"),
+        step.get("output") if isinstance(step.get("output"), dict) else {},
+        str(step.get("timestamp") or ""),
+        int(step.get("timestamp_ms") or 0),
+    )
+    globals()["read_reasoning_steps"] = local_store.list_reasoning_steps
+    globals()["write_workflow_checkpoint"] = local_store.upsert_workflow_checkpoint
+    globals()["read_workflow_checkpoint"] = local_store.get_workflow_checkpoint
+    globals()["write_workflow_outcome"] = local_store.upsert_workflow_outcome
+    globals()["read_workflow_outcomes"] = local_store.list_workflow_outcomes

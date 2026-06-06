@@ -1,26 +1,42 @@
+import { lazy, Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { FirebaseRedirectResume } from "@/components/FirebaseRedirectResume";
-import LandingPage from "./pages/LandingPage";
-import LoginPage from "./pages/LoginPage";
-import RegisterPage from "./pages/RegisterPage";
-import OnboardingPage from "./pages/OnboardingPage";
-import DashboardLayout from "./components/DashboardLayout";
-import NotFound from "./pages/NotFound";
+
+// Lazy loaded pages
+const LandingPage = lazy(() => import("./pages/LandingPage"));
+const LoginPage = lazy(() => import("./pages/LoginPage"));
+const RegisterPage = lazy(() => import("./pages/RegisterPage"));
+const OnboardingPage = lazy(() => import("./pages/OnboardingPage"));
+const DashboardLayout = lazy(() => import("./components/DashboardLayout"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 // v4 Core Pages
-import CommandCenter from "@/pages/dashboard/CommandCenter";
-import NetworkView from "@/pages/dashboard/NetworkView";
-import Incidents from "@/pages/dashboard/Incidents";
-import IncidentSimulator from "@/pages/dashboard/IncidentSimulator";
-import Intelligence from "@/pages/dashboard/Intelligence";
-import Compliance from "@/pages/dashboard/Compliance";
-import SettingsPage from "./pages/dashboard/SettingsPage";
-import RouteViewer from "@/pages/dashboard/RouteViewer";
-// Legacy pages removed in v4
+const CommandCenter = lazy(() => import("@/pages/dashboard/CommandCenter"));
+const NetworkView = lazy(() => import("@/pages/dashboard/NetworkView"));
+const Incidents = lazy(() => import("@/pages/dashboard/Incidents"));
+const IncidentSimulator = lazy(() => import("@/pages/dashboard/IncidentSimulator"));
+const Intelligence = lazy(() => import("@/pages/dashboard/Intelligence"));
+const Compliance = lazy(() => import("@/pages/dashboard/Compliance"));
+const SettingsPage = lazy(() => import("./pages/dashboard/SettingsPage"));
+const RouteViewer = lazy(() => import("@/pages/dashboard/RouteViewer"));
+
 const queryClient = new QueryClient();
+
+// Premium, elegant skeleton loader placeholder matching design variables
+const PageLoader = () => (
+  <div className="w-full h-screen flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm">
+    <div className="relative flex items-center justify-center">
+      <div className="w-12 h-12 rounded-full border-[3px] border-muted/80 border-t-sentinel animate-spin" />
+      <div className="absolute w-6 h-6 rounded-full bg-sentinel/10 animate-pulse-subtle" />
+    </div>
+    <span className="text-[10px] font-headline font-bold uppercase tracking-[0.2em] text-slate-500 mt-4 animate-pulse-subtle">
+      Synchronizing Node telemetry...
+    </span>
+  </div>
+);
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -28,24 +44,26 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <FirebaseRedirectResume />
-        <Routes>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
-          <Route path="/onboarding" element={<OnboardingPage />} />
-          <Route path="/dashboard" element={<DashboardLayout />}>
-            {/* ── v4 Core Routes ── */}
-            <Route index element={<CommandCenter />} />
-            <Route path="network" element={<NetworkView />} />
-            <Route path="incidents" element={<Incidents />} />
-            <Route path="incident-simulator" element={<IncidentSimulator />} />
-            <Route path="intelligence" element={<Intelligence />} />
-            <Route path="compliance" element={<Compliance />} />
-            <Route path="settings" element={<SettingsPage />} />
-            <Route path="route-viewer" element={<RouteViewer />} />
-          </Route>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/register" element={<RegisterPage />} />
+            <Route path="/onboarding" element={<OnboardingPage />} />
+            <Route path="/dashboard" element={<DashboardLayout />}>
+              {/* ── v4 Core Routes ── */}
+              <Route index element={<CommandCenter />} />
+              <Route path="network" element={<NetworkView />} />
+              <Route path="incidents" element={<Incidents />} />
+              <Route path="incident-simulator" element={<IncidentSimulator />} />
+              <Route path="intelligence" element={<Intelligence />} />
+              <Route path="compliance" element={<Compliance />} />
+              <Route path="settings" element={<SettingsPage />} />
+              <Route path="route-viewer" element={<RouteViewer />} />
+            </Route>
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>

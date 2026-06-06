@@ -1402,20 +1402,26 @@ async def audit_certificate(audit_id: str, user=Depends(verify_firebase_or_local
 
 @app.get("/api/dashboard/kpis")
 async def api_dashboard_kpis(user=Depends(verify_firebase_or_local_token)) -> dict:
-    suppliers = _context_suppliers(str(user.get("sub") or "").strip())
-    events = _api_risk_events()
-    rfqs = list_rfq_events(limit=500)
-    return {
-        "totalSuppliers": len(suppliers),
-        "activeRiskEvents": len(events),
-        "avgExposure": round(sum(s["exposureScore"] for s in suppliers) / max(1, len(suppliers)), 2),
-        "rfqsSent": len([r for r in rfqs if str(r.get("status", "")).lower() == "sent"]),
-    }
+    user_id = str(user.get("sub") or "").strip()
+    cache_key = f"kpis_{user_id}"
+
+    async def produce_kpis():
+        suppliers = _context_suppliers(user_id)
+        events = _api_risk_events()
+        rfqs = list_rfq_events(limit=500)
+        return {
+            "totalSuppliers": len(suppliers),
+            "activeRiskEvents": len(events),
+            "avgExposure": round(sum(s["exposureScore"] for s in suppliers) / max(1, len(suppliers)), 2),
+            "rfqsSent": len([r for r in rfqs if str(r.get("status", "")).lower() == "sent"]),
+        }
+
+    return await _cached_json(cache_key, 15, produce_kpis)
 
 
 @app.get("/api/dashboard/events")
 async def api_dashboard_events() -> list[dict]:
-    return _api_risk_events()
+    return await _cached_json("dashboard_events", 15, _api_risk_events)
 
 
 @app.get("/api/dashboard/workflows")

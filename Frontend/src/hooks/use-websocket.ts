@@ -40,21 +40,13 @@ const CLIENT_PING_INTERVAL_MS = 20_000;
 
 function _getWsUrl(tenantId: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-<<<<<<< HEAD
   const apiBase = import.meta.env.VITE_API_BASE
-    || import.meta.env.VITE_API_URL
-    || import.meta.env.VITE_API_BASE_URL;
-
-  const host = apiBase?.replace(/^https?:\/\//, "") || window.location.host;
-  // Strip trailing /api if present
-  const cleanHost = host.replace(/\/api\/?$/, "");
-=======
-  const host = (import.meta.env.VITE_API_BASE ?? import.meta.env.VITE_API_URL ?? "")
-    .replace(/^https?:\/\//, "")
-    || window.location.host;
+    ?? import.meta.env.VITE_API_URL
+    ?? import.meta.env.VITE_API_BASE_URL
+    ?? "";
+  const host = apiBase.replace(/^https?:\/\//, "") || window.location.host;
   // Strip trailing /api if present, then any trailing slash
   const cleanHost = host.replace(/\/api\/?$/, "").replace(/\/+$/, "");
->>>>>>> bfe10f4a87445827c0dd488317e528db5644ae9e
   return `${proto}//${cleanHost}/ws/${tenantId}`;
 }
 

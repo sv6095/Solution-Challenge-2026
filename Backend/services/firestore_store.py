@@ -10,6 +10,353 @@ from uuid import uuid4
 
 from google.cloud import firestore as g_firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
+from pathlib import Path
+import logging
+
+DB_PATH = Path(__file__).resolve().parent.parent / "local_fallback.db"
+
+
+def _connect_db():
+    import sqlite3
+    con = sqlite3.connect(DB_PATH)
+    try:
+        con.execute("PRAGMA journal_mode=WAL;")
+        con.execute("PRAGMA synchronous=NORMAL;")
+        con.execute("PRAGMA cache_size=-2000;")
+        con.execute("PRAGMA temp_store=MEMORY;")
+    except Exception as exc:
+        logger.warning("Failed to configure SQLite PRAGMAs: %s", exc)
+    return con
+
+
+class DocumentSnapshot:
+    def __init__(self, doc_id: str, collection_path: list[str], data: dict | None):
+        self.id = doc_id
+        self.exists = data is not None
+        self._data = data or {}
+        self.reference = DocumentBuilder(collection_path + [doc_id])
+
+    def to_dict(self) -> dict:
+        return self._data
+
+
+class DocumentBuilder:
+    def __init__(self, path: list[str]):
+        self.path = path
+        self.id = path[-1]
+
+    def collection(self, name: str):
+        return CollectionBuilder(self.path + [name])
+
+    def get(self):
+        collection_name = "/".join(self.path[:-1])
+        document_id = self.id
+        data = _emulator_db_read(collection_name, document_id)
+        return DocumentSnapshot(document_id, self.path[:-1], data)
+
+    def set(self, data: dict, merge: bool = False):
+        collection_name = "/".join(self.path[:-1])
+        document_id = self.id
+        _emulator_db_write(collection_name, document_id, data, merge)
+
+    def delete(self):
+        collection_name = "/".join(self.path[:-1])
+        document_id = self.id
+        _emulator_db_delete(collection_name, document_id)
+
+    @property
+    def reference(self):
+        return self
+
+
+class QueryBuilder:
+    def __init__(self, collection_name: str, is_group: bool = False):
+        self.collection_name = collection_name
+        self.is_group = is_group
+        self.filters = []
+        self.orders = []
+        self.limit_val = None
+
+    def where(self, filter=None, field=None, op=None, value=None):
+        if filter is not None:
+            field = getattr(filter, "field_path", None)
+            op = getattr(filter, "op", None)
+            value = getattr(filter, "value", None)
+            if field is None:
+                try:
+                    field = filter.field_path
+                    op = filter.op
+                    value = filter.value
+                except Exception:
+                    pass
+        if field is not None:
+            self.filters.append((field, op, value))
+        return self
+
+    def order_by(self, field: str, direction=None):
+        self.orders.append((field, direction))
+        return self
+
+    def limit(self, val: int):
+        self.limit_val = val
+        return self
+
+    def stream(self):
+        return _emulator_query(self)
+
+
+class CollectionBuilder(QueryBuilder):
+    def __init__(self, path: list[str] | str):
+        if isinstance(path, str):
+            path = [path]
+        super().__init__("/".join(path))
+        self.path = path
+
+    def document(self, name: str = None):
+        if name is None:
+            name = uuid4().hex
+        return DocumentBuilder(self.path + [name])
+
+
+class CollectionGroupBuilder(QueryBuilder):
+    def __init__(self, name: str):
+        super().__init__(name, is_group=True)
+
+
+class BatchBuilder:
+    def __init__(self):
+        self.operations = []
+
+    def set(self, ref: DocumentBuilder, data: dict, merge: bool = False):
+        self.operations.append(("set", ref, data, merge))
+
+    def delete(self, ref: DocumentBuilder):
+        self.operations.append(("delete", ref, None, False))
+
+    def commit(self):
+        import json
+        con = _connect_db()
+        try:
+            with con:
+                for op, ref, data, merge in self.operations:
+                    collection_name = "/".join(ref.path[:-1])
+                    document_id = ref.id
+                    if op == "set":
+                        if merge:
+                            cur = con.cursor()
+                            cur.execute(
+                                "SELECT data_json FROM firestore_emulator WHERE collection_name = ? AND document_id = ?",
+                                (collection_name, document_id)
+                            )
+                            row = cur.fetchone()
+                            existing = {}
+                            if row:
+                                try:
+                                    existing = json.loads(row[0])
+                                except Exception:
+                                    pass
+                            existing.update(data)
+                            data = existing
+                        con.execute(
+                            """
+                            INSERT OR REPLACE INTO firestore_emulator (collection_name, document_id, data_json)
+                            VALUES (?, ?, ?)
+                            """,
+                            (collection_name, document_id, json.dumps(data))
+                        )
+                    elif op == "delete":
+                        con.execute(
+                            "DELETE FROM firestore_emulator WHERE collection_name = ? AND document_id = ?",
+                            (collection_name, document_id)
+                        )
+        finally:
+            con.close()
+
+
+class SQLiteFirestoreProxy:
+    def collection(self, name: str):
+        return CollectionBuilder(name)
+
+    def collection_group(self, name: str):
+        return CollectionGroupBuilder(name)
+
+    def batch(self):
+        return BatchBuilder()
+
+
+def init_emulator_db() -> None:
+    con = _connect_db()
+    try:
+        with con:
+            con.execute(
+                """
+                CREATE TABLE IF NOT EXISTS firestore_emulator (
+                    collection_name TEXT NOT NULL,
+                    document_id TEXT NOT NULL,
+                    data_json TEXT NOT NULL,
+                    PRIMARY KEY (collection_name, document_id)
+                )
+                """
+            )
+            con.execute("CREATE INDEX IF NOT EXISTS idx_emulator_collection ON firestore_emulator(collection_name)")
+    finally:
+        con.close()
+
+
+def _emulator_db_read(collection_name: str, document_id: str) -> dict | None:
+    import json
+    con = _connect_db()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT data_json FROM firestore_emulator WHERE collection_name = ? AND document_id = ?",
+        (collection_name, document_id)
+    )
+    row = cur.fetchone()
+    con.close()
+    if row:
+        try:
+            return json.loads(row[0])
+        except Exception:
+            return {}
+    return None
+
+
+def _emulator_db_write(collection_name: str, document_id: str, data: dict, merge: bool = False):
+    import json
+    con = _connect_db()
+    try:
+        with con:
+            if merge:
+                cur = con.cursor()
+                cur.execute(
+                    "SELECT data_json FROM firestore_emulator WHERE collection_name = ? AND document_id = ?",
+                    (collection_name, document_id)
+                )
+                row = cur.fetchone()
+                existing = {}
+                if row:
+                    try:
+                        existing = json.loads(row[0])
+                    except Exception:
+                        pass
+                existing.update(data)
+                data = existing
+            con.execute(
+                """
+                INSERT OR REPLACE INTO firestore_emulator (collection_name, document_id, data_json)
+                VALUES (?, ?, ?)
+                """,
+                (collection_name, document_id, json.dumps(data))
+            )
+    finally:
+        con.close()
+
+
+def _emulator_db_delete(collection_name: str, document_id: str):
+    con = _connect_db()
+    try:
+        with con:
+            con.execute(
+                "DELETE FROM firestore_emulator WHERE collection_name = ? AND document_id = ?",
+                (collection_name, document_id)
+            )
+    finally:
+        con.close()
+
+
+def _emulator_query(builder: QueryBuilder) -> list[DocumentSnapshot]:
+    import json
+    con = _connect_db()
+    cur = con.cursor()
+    if builder.is_group:
+        cur.execute(
+            "SELECT collection_name, document_id, data_json FROM firestore_emulator WHERE collection_name = ? OR collection_name LIKE ?",
+            (builder.collection_name, builder.collection_name + "/%")
+        )
+    else:
+        cur.execute(
+            "SELECT collection_name, document_id, data_json FROM firestore_emulator WHERE collection_name = ?",
+            (builder.collection_name,)
+        )
+    rows = cur.fetchall()
+    con.close()
+    
+    results = []
+    for col_path, doc_id, data_json in rows:
+        try:
+            data = json.loads(data_json)
+        except Exception:
+            data = {}
+        
+        match = True
+        for field, op, val in builder.filters:
+            field_val = data
+            for part in field.split("."):
+                if isinstance(field_val, dict):
+                    field_val = field_val.get(part)
+                else:
+                    field_val = None
+                    break
+            
+            if op in ("==", "equal"):
+                if field_val != val:
+                    match = False
+            elif op == "<":
+                if not (field_val is not None and field_val < val):
+                    match = False
+            elif op == "<=":
+                if not (field_val is not None and field_val <= val):
+                    match = False
+            elif op == ">":
+                if not (field_val is not None and field_val > val):
+                    match = False
+            elif op == ">=":
+                if not (field_val is not None and field_val >= val):
+                    match = False
+            elif op == "!=":
+                if field_val == val:
+                    match = False
+            elif op == "array-contains":
+                if not (isinstance(field_val, list) and val in field_val):
+                    match = False
+            elif op == "in":
+                if not (isinstance(val, list) and field_val in val):
+                    match = False
+            else:
+                if field_val != val:
+                    match = False
+                    
+            if not match:
+                break
+                
+        if match:
+            results.append(DocumentSnapshot(doc_id, col_path.split("/"), data))
+            
+    for field, direction in reversed(builder.orders):
+        is_desc = False
+        if direction is not None:
+            dir_str = str(direction).upper()
+            if "DESC" in dir_str or "DESCENDING" in dir_str:
+                is_desc = True
+        
+        def sort_key(snap):
+            val = snap._data
+            for part in field.split("."):
+                if isinstance(val, dict):
+                    val = val.get(part)
+                else:
+                    val = None
+                    break
+            if val is None:
+                return "" if is_desc else "\xff\xff\xff"
+            return val
+            
+        results.sort(key=sort_key, reverse=is_desc)
+        
+    if builder.limit_val is not None:
+        results = results[:builder.limit_val]
+        
+    return results
 
 
 def gcp_project_id() -> str | None:
@@ -33,31 +380,49 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+_use_local_fallback = None
+
+def _should_use_local() -> bool:
+    global _use_local_fallback
+    if _use_local_fallback is not None:
+        return _use_local_fallback
+    db_provider = os.getenv("DB_PROVIDER", "firestore").strip().lower()
+    if db_provider in ("local", "sqlite") or not gcp_project_id():
+        _use_local_fallback = True
+    else:
+        _use_local_fallback = False
+    return _use_local_fallback
+
+
 _FIRESTORE_CLIENT: g_firestore.Client | None = None
 _FIRESTORE_CLIENT_LOCK = Lock()
 
 
 def _client() -> g_firestore.Client:
     """
-    Return a process-wide Firestore client singleton.
-
-    Creating a new Firestore client per request is expensive (gRPC channel setup,
-    auth metadata, connection warm-up) and can materially slow API throughput on Render.
+    Return a process-wide Firestore client singleton or fallback to SQLite proxy.
     """
-    global _FIRESTORE_CLIENT
+    global _FIRESTORE_CLIENT, _use_local_fallback
     if _FIRESTORE_CLIENT is not None:
         return _FIRESTORE_CLIENT
     with _FIRESTORE_CLIENT_LOCK:
         if _FIRESTORE_CLIENT is not None:
             return _FIRESTORE_CLIENT
+        
+        if _should_use_local():
+            init_emulator_db()
+            _FIRESTORE_CLIENT = SQLiteFirestoreProxy()
+            return _FIRESTORE_CLIENT
+
         project = gcp_project_id()
         try:
             _FIRESTORE_CLIENT = g_firestore.Client(project=project)
         except Exception as exc:
-            raise RuntimeError(
-                "Firestore is required but could not be initialized. Set FIREBASE_PROJECT_ID "
-                "and GOOGLE_APPLICATION_CREDENTIALS for the backend runtime."
-            ) from exc
+            logger.warning("Failed to initialize Firestore client, falling back to local SQLite emulator: %s", exc)
+            _use_local_fallback = True
+            init_emulator_db()
+            _FIRESTORE_CLIENT = SQLiteFirestoreProxy()
+            return _FIRESTORE_CLIENT
         return _FIRESTORE_CLIENT
 
 
@@ -587,3 +952,14 @@ def get_global_impacted_tenants(duns_number: str) -> list[str]:
         if tenant:
             tenants.add(tenant)
     return sorted(tenants)
+
+
+if _should_use_local():
+    import services.local_store as local_store
+    local_store.init_local_store()
+    for name in list(globals().keys()):
+        if name.startswith("_") or name in ("init_store", "init_emulator_db", "gcp_project_id", "DB_PATH"):
+            continue
+        if hasattr(local_store, name):
+            globals()[name] = getattr(local_store, name)
+    globals()["init_store"] = local_store.init_local_store

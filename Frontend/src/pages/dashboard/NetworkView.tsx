@@ -1780,33 +1780,11 @@ export default function NetworkView() {
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   /* ── Data queries ───────────────────────────────────────────── */
-<<<<<<< HEAD
   const { data: suppRaw = [] }  = useQuery({ queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000, refetchInterval:30000 });
   const { data: evtsRaw = [] }  = useQuery({ queryKey:["risks","events"],   queryFn:()=>api.risks.events(),   staleTime:120_000, refetchInterval:30000 });
-  const { data: hazRaw }        = useQuery({ queryKey:["g","haz"],  queryFn:()=>api.global.hazards(),      staleTime:300_000, refetchInterval:30000 });
-  const { data: quakeRaw }      = useQuery({ queryKey:["g","quake"],queryFn:()=>api.global.earthquakes(),  staleTime:300_000, refetchInterval:30000 });
-  const { data: conflRaw }      = useQuery({ queryKey:["g","conf"], queryFn:()=>api.global.conflict(),     staleTime:300_000, refetchInterval:30000 });
-  const { data: fireRaw }       = useQuery({ queryKey:["g","fires"],queryFn:()=>api.global.fires(),        staleTime:600_000, refetchInterval:30000 });
-  const { data: chopRaw }       = useQuery({ queryKey:["g","chop"], queryFn:()=>api.global.chokepoints(),  staleTime:120_000, refetchInterval:30000 });
-  const { data: stressRaw }     = useQuery({ queryKey:["g","stress"],queryFn:()=>api.global.shippingStress(), staleTime:120_000, refetchInterval:30000 });
-  const { data: sriskRaw }      = useQuery({ queryKey:["g","srisk"], queryFn:()=>api.global.strategicRisk(), staleTime:120_000, refetchInterval:30000 });
-  const { data: newsRaw }       = useQuery({ queryKey:["g","news"],  queryFn:()=>api.global.supplyChainNews(), staleTime:300_000, refetchInterval:30000 });
-  const { data: quotesRaw }     = useQuery({ queryKey:["g","quotes"],queryFn:()=>api.global.marketQuotes(), staleTime:60_000, refetchInterval:30000 });
-  const { data: mineralsRaw }   = useQuery({ queryKey:["g","minerals"],queryFn:()=>api.global.minerals(), staleTime:600_000, refetchInterval:30000 });
-  const { data: instabilRaw }   = useQuery({ queryKey:["g","instab"],queryFn:()=>api.global.countryInstability(), staleTime:300_000, refetchInterval:30000 });
-  const { data: mktImplRaw }    = useQuery({ queryKey:["g","mktimpl"],queryFn:()=>api.global.marketImplications(), staleTime:300_000, refetchInterval:30000 });
-  const { data: disastersRaw }  = useQuery({ queryKey:["g","disasters"],queryFn:()=>api.global.disasters(), staleTime:300_000, refetchInterval:30000 });
-  const { data: gdeltResp }     = useQuery({ queryKey:["g","gdelt"],queryFn:()=>api.global.gdelt(), staleTime:300_000, refetchInterval:30000 });
-  const { data: summary }       = useQuery({ queryKey:["g","summary"],queryFn:()=>api.global.summary(), staleTime:120_000, refetchInterval:30000 });
+  const { data: globalBundle }  = useGlobalDashboardBundle();
   const { data: auditList=[] }  = useQuery({ queryKey:["audit","list"],queryFn:()=>api.audit.list(), staleTime:300_000, refetchInterval:30000 });
   const { data: gapReport }     = useQuery({ queryKey:["intel","gaps"],queryFn:()=>api.intelligence.gaps(), staleTime:120_000, refetchInterval:30000 });
-=======
-  const { data: suppRaw = [] }  = useQuery({ queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000 });
-  const { data: evtsRaw = [] }  = useQuery({ queryKey:["risks","events"],   queryFn:()=>api.risks.events(),   staleTime:120_000 });
-  const { data: globalBundle }  = useGlobalDashboardBundle();
-  const { data: auditList=[] }  = useQuery({ queryKey:["audit","list"],queryFn:()=>api.audit.list(), staleTime:300_000 });
-  const { data: gapReport }     = useQuery({ queryKey:["intel","gaps"],queryFn:()=>api.intelligence.gaps(), staleTime:120_000 });
->>>>>>> bfe10f4a87445827c0dd488317e528db5644ae9e
 
   /* ── User Context (Logistics Nodes) ────────────────────────── */
   const userId = useMemo(() => getUserId(), []);

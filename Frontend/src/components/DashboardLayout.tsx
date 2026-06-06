@@ -191,7 +191,7 @@ const DashboardLayout = () => {
     let notificationLink = "";
     let iconType = "incident";
 
-    const payload = lastEvent.payload || {};
+    const payload = (lastEvent.payload || {}) as any;
 
     switch (lastEvent.type) {
       case "incident_created": {

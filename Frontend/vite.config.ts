@@ -31,4 +31,30 @@ export default defineConfig(({ mode }) => ({
       "@mapcn/delivery-tracker": path.resolve(__dirname, "./src/mapcn/delivery-tracker.tsx"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules")) {
+            if (id.includes("maplibre-gl")) {
+              return "maplibre";
+            }
+            if (id.includes("@splinetool")) {
+              return "spline";
+            }
+            if (id.includes("lucide-react")) {
+              return "lucide";
+            }
+            if (id.includes("recharts")) {
+              return "recharts";
+            }
+            if (id.includes("firebase")) {
+              return "firebase";
+            }
+            return "vendor";
+          }
+        },
+      },
+    },
+  },
 }));

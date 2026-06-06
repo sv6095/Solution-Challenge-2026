@@ -24,11 +24,8 @@ from agents.extended_signal_agent import (
     fetch_social_sentiment,
     fetch_wto_trade_signals,
 )
-<<<<<<< HEAD
-from services.local_store import add_audit, purge_archived_signals, replace_active_signals, DB_PATH
-=======
 from services.firestore_store import add_audit, purge_archived_signals, replace_active_signals
->>>>>>> bfe10f4a87445827c0dd488317e528db5644ae9e
+from services.local_store import DB_PATH
 from services.secret_manager import get_secret
 
 _scheduler: BackgroundScheduler | None = None
@@ -191,29 +188,37 @@ async def _poll_sources() -> None:
     gnews_api_key = get_secret("GNEWS_API_KEY")
 
     batches: list[dict] = []
-    for fn in (
-        fetch_nasa_eonet,
-        fetch_gdelt,
-        lambda: fetch_newsapi(news_api_key),
-        lambda: fetch_gnews(gnews_api_key),
-        # ── Extended free sources ─────────────────────────────────
-        fetch_gdacs,
-        fetch_usgs_earthquakes,
-        fetch_nasa_firms,
-        fetch_reliefweb,
-        fetch_acled,
-        fetch_portwatch_transit_alerts,
-        fetch_portwatch_disruptions,
-        fetch_gps_interference,
-        fetch_wto_trade_signals,
-        fetch_ofac_sanctions,
-        fetch_social_sentiment,
-    ):
+
+    async def run_safe(fn) -> list[dict]:
         try:
-            items = await fn()
-            batches.extend(items)
+            return await fn()
         except Exception as exc:
             add_audit("signal_poll_error", str(exc))
+            return []
+
+    tasks = [
+        run_safe(fetch_nasa_eonet),
+        run_safe(fetch_gdelt),
+        run_safe(lambda: fetch_newsapi(news_api_key)),
+        run_safe(lambda: fetch_gnews(gnews_api_key)),
+        # ── Extended free sources ─────────────────────────────────
+        run_safe(fetch_gdacs),
+        run_safe(fetch_usgs_earthquakes),
+        run_safe(fetch_nasa_firms),
+        run_safe(fetch_reliefweb),
+        run_safe(fetch_acled),
+        run_safe(fetch_portwatch_transit_alerts),
+        run_safe(fetch_portwatch_disruptions),
+        run_safe(fetch_gps_interference),
+        run_safe(fetch_wto_trade_signals),
+        run_safe(fetch_ofac_sanctions),
+        run_safe(fetch_social_sentiment),
+    ]
+
+    results = await asyncio.gather(*tasks)
+    for items in results:
+        if items:
+            batches.extend(items)
 
     # Deduplicate by signal ID
     dedup: dict[str, dict] = {}
