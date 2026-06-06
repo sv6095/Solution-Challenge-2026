@@ -19,9 +19,9 @@ celery_app.conf.update(
     enable_utc=True,
     # Celery Beat config for distributed autonomous execution
     beat_schedule={
-        "poll-signals-every-15-minutes": {
+        "poll-signals-every-30-minutes": {
             "task": "scheduler.tasks.poll_signals",
-            "schedule": 900.0, # 15 minutes
+            "schedule": 1800.0, # 30 minutes
         }
     }
 )

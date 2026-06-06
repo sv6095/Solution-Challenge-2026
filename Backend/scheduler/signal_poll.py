@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import hashlib
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -22,7 +24,7 @@ from agents.extended_signal_agent import (
     fetch_social_sentiment,
     fetch_wto_trade_signals,
 )
-from services.local_store import add_audit, purge_archived_signals, replace_active_signals
+from services.local_store import add_audit, purge_archived_signals, replace_active_signals, DB_PATH
 from services.secret_manager import get_secret
 
 _scheduler: BackgroundScheduler | None = None
@@ -85,6 +87,100 @@ def _derive_country_instability_signals(items: list[dict]) -> list[dict]:
     derived.sort(key=lambda item: float(item.get("cii_score") or 0.0), reverse=True)
     return derived[:12]
 
+# ── Stale incident purge ──────────────────────────────────────────────
+
+# Incidents older than these thresholds are auto-purged so the dashboard
+# always shows fresh, relevant data.  Active incidents (DETECTED,
+# ANALYZED, AWAITING_APPROVAL) are purged after ACTIVE_TTL_HOURS;
+# resolved/dismissed incidents are kept longer (RESOLVED_TTL_DAYS) for
+# audit trail then removed.
+
+ACTIVE_TTL_HOURS = int(os.getenv("INCIDENT_ACTIVE_TTL_HOURS", "24"))
+RESOLVED_TTL_DAYS = int(os.getenv("INCIDENT_RESOLVED_TTL_DAYS", "7"))
+
+
+def _purge_stale_incidents() -> int:
+    """Delete incidents that have gone stale based on age + status.
+
+    Returns the number of purged rows.
+    """
+    import sqlite3
+
+    now = datetime.now(timezone.utc)
+    active_cutoff = (now - timedelta(hours=ACTIVE_TTL_HOURS)).isoformat()
+    resolved_cutoff = (now - timedelta(days=RESOLVED_TTL_DAYS)).isoformat()
+
+    purged = 0
+    try:
+        with sqlite3.connect(DB_PATH) as con:
+            # 1) Purge active incidents older than ACTIVE_TTL_HOURS
+            cur = con.execute(
+                """
+                DELETE FROM incidents
+                WHERE status IN ('DETECTED', 'ANALYZED', 'AWAITING_APPROVAL')
+                  AND created_at < ?
+                """,
+                (active_cutoff,),
+            )
+            purged += cur.rowcount or 0
+
+            # 2) Purge resolved/dismissed incidents older than RESOLVED_TTL_DAYS
+            cur = con.execute(
+                """
+                DELETE FROM incidents
+                WHERE status IN ('RESOLVED', 'APPROVED', 'DISMISSED')
+                  AND created_at < ?
+                """,
+                (resolved_cutoff,),
+            )
+            purged += cur.rowcount or 0
+
+            # 3) Purge simulation-only artefacts older than 24h
+            cur = con.execute(
+                """
+                DELETE FROM incidents
+                WHERE json_extract(payload_json, '$.simulation_only') = 1
+                  AND created_at < ?
+                """,
+                (active_cutoff,),
+            )
+            purged += cur.rowcount or 0
+
+            # 4) Cleanup orphaned reasoning steps for deleted incidents
+            con.execute(
+                """
+                DELETE FROM reasoning_steps
+                WHERE workflow_id NOT IN (SELECT id FROM incidents)
+                """
+            )
+
+            con.commit()
+    except Exception as exc:
+        add_audit("incident_purge_error", str(exc)[:200])
+
+    if purged > 0:
+        add_audit("incident_purge", f"purged={purged} active_cutoff={ACTIVE_TTL_HOURS}h resolved_cutoff={RESOLVED_TTL_DAYS}d")
+
+    return purged
+
+
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(val: Any, default: int = 0) -> int:
+    if val is None:
+        return default
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return default
+
 
 async def _poll_sources() -> None:
     news_api_key = get_secret("NEWSAPI_API_KEY")
@@ -137,6 +233,9 @@ async def _poll_sources() -> None:
     purged = purge_archived_signals(days=7)
     add_audit("signal_poll_complete", f"active={len(dedup)} purged={purged}")
 
+    # ── Purge stale incidents before generating new ones ──────────────
+    stale_purged = _purge_stale_incidents()
+
     # ── v4 Autonomous Incident Generation ────────────────────────────
     # After signals land, push the top events through the GNN-based
     # incident engine so incidents appear without any user click.
@@ -162,37 +261,94 @@ async def _poll_sources() -> None:
                 "timestamp": str(sig.get("created_at") or ""),
             })
 
-        # Avoid re-creating incidents for events already processed
-        existing_ids = {str(inc.get("event_id") or inc.get("id") or "") for inc in list_incidents(limit=500)}
+        # Query all contexts from SQLite for multi-tenant incident generation
+        import sqlite3
+        contexts_list = []
+        try:
+            with sqlite3.connect(DB_PATH) as con:
+                con.row_factory = sqlite3.Row
+                rows = con.execute("SELECT user_id, payload_json FROM contexts").fetchall()
+                for r in rows:
+                    contexts_list.append({
+                        "user_id": r["user_id"],
+                        "payload_json": r["payload_json"]
+                    })
+        except Exception as exc:
+            add_audit("context_fetch_error", str(exc))
 
-        # Build a lightweight supplier list from the data registry
-        from services.data_registry import registry
-        suppliers = []
-        for idx, port in enumerate(registry.ports[:50]):
-            exposure = round(25 + ((abs(port.lat) + abs(port.lng)) % 70), 1)
-            suppliers.append({
-                "id": f"sup_{idx + 1}",
-                "name": f"{port.city} Node",
-                "country": port.country,
-                "location": f"{port.city}, {port.country}",
-                "tier": f"Tier {(idx % 3) + 1}",
-                "exposureScore": exposure,
-                "lat": port.lat,
-                "lng": port.lng,
-            })
-
-        created = 0
-        for evt in events[:15]:  # cap at 15 per cycle
-            if evt["id"] in existing_ids:
+        for ctx in contexts_list:
+            user_id = ctx["user_id"]
+            try:
+                payload = json.loads(ctx["payload_json"] or "{}")
+            except Exception:
+                payload = {}
+            if not payload or not isinstance(payload, dict):
                 continue
-            inc = incident_engine.process_event(evt, suppliers)
-            if inc:
-                upsert_incident(inc.id, inc.to_dict(), inc.status, inc.severity)
-                add_audit("incident_auto_created", f"{inc.id}:{inc.severity}")
-                created += 1
 
-        if created > 0:
-            add_audit("incident_auto_batch", f"created={created}")
+            # Resolve tenant_id (consistent with _resolved_request_tenant logic)
+            customer_id = str(payload.get("customer_id") or payload.get("company_name") or "").strip()
+            tenant_id = customer_id if customer_id else user_id
+
+            # Gather suppliers and logistics nodes
+            ctx_suppliers = payload.get("suppliers", [])
+            ctx_logistics = payload.get("logistics_nodes", [])
+
+            suppliers_for_gnn = []
+            for idx, s in enumerate(ctx_suppliers):
+                name = s.get("name") or f"Supplier {idx+1}"
+                suppliers_for_gnn.append({
+                    "id": s.get("id") or f"sup_{tenant_id}_{idx+1}",
+                    "name": name,
+                    "country": s.get("country") or "",
+                    "location": s.get("location") or f"{s.get('city', '')}, {s.get('country', '')}".strip(", "),
+                    "tier": s.get("tier") or "Tier 1",
+                    "exposureScore": _safe_float(s.get("exposureScore") or s.get("exposure_score"), 50.0),
+                    "lat": _safe_float(s.get("lat"), 0.0),
+                    "lng": _safe_float(s.get("lng"), 0.0),
+                    "duns_number": s.get("duns_number") or s.get("dunsNumber") or "",
+                    "contract_value_usd": _safe_float(s.get("contract_value_usd"), 100000.0),
+                    "daily_throughput_usd": _safe_float(s.get("daily_throughput_usd"), 10000.0),
+                    "safety_stock_days": _safe_int(s.get("safety_stock_days"), 7),
+                    "single_source": bool(s.get("single_source", False)),
+                    "criticality": s.get("criticality") or "medium",
+                })
+
+            for idx, l in enumerate(ctx_logistics):
+                name = l.get("name") or f"Logistics Node {idx+1}"
+                suppliers_for_gnn.append({
+                    "id": l.get("id") or f"log_{tenant_id}_{idx+1}",
+                    "name": name,
+                    "country": l.get("country") or "",
+                    "location": l.get("location") or f"{l.get('city', '')}, {l.get('country', '')}".strip(", "),
+                    "tier": "Tier 0",
+                    "exposureScore": _safe_float(l.get("exposureScore") or l.get("exposure_score"), 50.0),
+                    "lat": _safe_float(l.get("lat"), 0.0),
+                    "lng": _safe_float(l.get("lng"), 0.0),
+                    "duns_number": l.get("duns_number") or l.get("dunsNumber") or "",
+                    "contract_value_usd": 0.0,
+                    "daily_throughput_usd": _safe_float(l.get("daily_throughput_usd"), 0.0),
+                    "safety_stock_days": _safe_int(l.get("safety_stock_days"), 7),
+                    "single_source": False,
+                    "criticality": l.get("criticality") or "medium",
+                })
+
+            if not suppliers_for_gnn:
+                continue
+
+            existing_ids = {str(inc.get("event_id") or inc.get("id") or "") for inc in list_incidents(limit=500, tenant_id=tenant_id)}
+
+            created = 0
+            for evt in events[:15]:
+                if evt["id"] in existing_ids:
+                    continue
+                inc = incident_engine.process_event(evt, suppliers_for_gnn)
+                if inc:
+                    upsert_incident(inc.id, inc.to_dict(), inc.status, inc.severity, tenant_id=tenant_id)
+                    add_audit("incident_auto_created", f"{tenant_id}:{inc.id}:{inc.severity}")
+                    created += 1
+
+            if created > 0:
+                add_audit("incident_auto_batch", f"tenant={tenant_id} created={created}")
     except Exception as exc:
         add_audit("incident_auto_error", str(exc)[:200])
 
@@ -208,9 +364,10 @@ def start_signal_scheduler() -> None:
     if _scheduler is not None:
         return
     _scheduler = BackgroundScheduler(timezone="UTC")
-    _scheduler.add_job(_job_wrapper, "interval", minutes=15, id="signal_poll_15m", replace_existing=True)
+    interval_minutes = int(os.getenv("SIGNAL_POLL_INTERVAL_MINUTES", "10"))
+    _scheduler.add_job(_job_wrapper, "interval", minutes=interval_minutes, id="signal_poll", replace_existing=True)
     _scheduler.start()
-    add_audit("signal_scheduler_started", "15m")
+    add_audit("signal_scheduler_started", f"{interval_minutes}m")
 
 
 async def force_poll() -> dict:

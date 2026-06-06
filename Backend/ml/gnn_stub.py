@@ -292,6 +292,7 @@ def build_graph_from_context(context: dict) -> SupplyChainGraph:
             safety_stock_days=int(s.get("safety_stock_days", 7)),
             single_source=bool(s.get("single_source", False)),
             criticality=str(s.get("criticality", "medium")),
+            location_precision=str(s.get("location_precision") or "exact"),
         )
         graph.add_node(node)
 
@@ -305,6 +306,7 @@ def build_graph_from_context(context: dict) -> SupplyChainGraph:
             lng=float(n.get("lng", 0)),
             country=str(n.get("country", "")),
             criticality=str(n.get("criticality", "medium")),
+            location_precision=str(n.get("location_precision") or "exact"),
         )
         graph.add_node(node)
 
@@ -367,6 +369,7 @@ def build_graph_from_dataset(suppliers: list[dict]) -> SupplyChainGraph:
             safety_stock_days=max(3, 14 - int(exposure / 10)) if not s.get("margin_percentage") else int(s.get("safety_stock_days", 7)),
             single_source=exposure >= 80,
             criticality="critical" if exposure >= 80 else "high" if exposure >= 60 else "medium",
+            location_precision=str(s.get("location_precision") or "exact"),
         )
         graph.add_node(node)
 

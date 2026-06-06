@@ -95,7 +95,7 @@ def _severity_from_score(score: float) -> IncidentSeverity:
 
 
 def _score_from_severity(label: str) -> float:
-    mapping = {"CRITICAL": 9.0, "HIGH": 7.0, "MODERATE": 5.0, "LOW": 3.0}
+    mapping = {"CRITICAL": 9.0, "HIGH": 7.0, "MODERATE": 5.0, "MEDIUM": 5.0, "LOW": 3.0}
     return mapping.get(label.upper(), 5.0)
 
 
@@ -120,10 +120,25 @@ class IncidentEngine:
         this acts as a CTE/GraphDB proxy, filtering down to only the impacted
         subgraph (nodes within radius + immediate N-tier dependents).
         """
+        COUNTRY_CENTROIDS = {
+            "india": (20.5937, 78.9629),
+            "in": (20.5937, 78.9629),
+            "germany": (51.1657, 10.4515),
+            "de": (51.1657, 10.4515),
+            "japan": (36.2048, 138.2529),
+            "jp": (36.2048, 138.2529),
+            "usa": (37.0902, -95.7129),
+            "us": (37.0902, -95.7129),
+            "united states": (37.0902, -95.7129),
+            "china": (35.8617, 104.1954),
+            "cn": (35.8617, 104.1954),
+            "taiwan": (23.6978, 120.9605),
+            "tw": (23.6978, 120.9605),
+            "vietnam": (14.0583, 108.2772),
+            "vn": (14.0583, 108.2772),
+        }
+
         # Step A: Geographic bounding box filter (simulating PostGIS / Neo4j spatial query)
-        lat_bound = event.radius_km / 111.0 # roughly 111 km per degree lat
-        lng_bound = event.radius_km / (111.0 * max(0.1, abs(math.cos(math.radians(event.lat)))))
-        
         impacted_candidates = []
         for s in suppliers:
             name = str(s.get("name") or "").lower()
@@ -133,8 +148,26 @@ class IncidentEngine:
             # 1. Geographic Check
             slat = float(s.get("lat") or 0)
             slng = float(s.get("lng") or 0)
-            geo_match = (event.lat - lat_bound <= slat <= event.lat + lat_bound) and \
-                        (event.lng - lng_bound <= slng <= event.lng + lng_bound)
+            if slat == 0.0 and slng == 0.0:
+                country_clean = str(s.get("country") or "").strip().lower()
+                if country_clean in COUNTRY_CENTROIDS:
+                    slat, slng = COUNTRY_CENTROIDS[country_clean]
+                    s["location_precision"] = "country"
+                    s["lat"] = slat
+                    s["lng"] = slng
+
+            precision = s.get("location_precision", "exact")
+            effective_radius = event.radius_km
+            if precision == "country":
+                effective_radius = max(event.radius_km * 12.0, 3000.0)
+            elif precision == "synthetic":
+                effective_radius = max(event.radius_km * 8.0, 1800.0)
+
+            node_lat_bound = effective_radius / 111.0
+            node_lng_bound = effective_radius / (111.0 * max(0.1, abs(math.cos(math.radians(event.lat)))))
+
+            geo_match = (event.lat - node_lat_bound <= slat <= event.lat + node_lat_bound) and \
+                        (event.lng - node_lng_bound <= slng <= event.lng + node_lng_bound)
                         
             # 2. Fuzzy Naming Check (Zero-Match Fix)
             # If the event lacks precise geo, or name variation exists, fallback to text similarity
@@ -156,10 +189,21 @@ class IncidentEngine:
             return SupplyChainGraph()
             
         # Step B: Graph Traversal and ERP Live Data Hydration
-        tier_set = {int(s.get("tier", 1)) for s in impacted_candidates}
+        def parse_tier(val: Any) -> int:
+            if not val:
+                return 1
+            val_str = str(val).strip().lower()
+            if "tier" in val_str:
+                val_str = val_str.replace("tier", "").strip()
+            try:
+                return int(val_str)
+            except ValueError:
+                return 1
+
+        tier_set = {parse_tier(s.get("tier", 1)) for s in impacted_candidates}
         subgraph_nodes = []
         for s in suppliers:
-            t = int(s.get("tier", 1))
+            t = parse_tier(s.get("tier", 1))
             if t in tier_set or t in {t - 1 for t in tier_set} or t in {t + 1 for t in tier_set}:
                 # Real-time ERP injection overriding static onboarding data
                 duns = s.get("dunsNumber") or s.get("duns_number") or ""
@@ -186,9 +230,11 @@ class IncidentEngine:
         incident_id = f"inc_{uuid4().hex[:12]}"
 
         # Parse event
-        severity_raw = float(event_data.get("severity", 0) or 0)
-        if isinstance(event_data.get("severity"), str):
-            severity_raw = _score_from_severity(event_data["severity"])
+        sev_val = event_data.get("severity", 0) or 0
+        if isinstance(sev_val, str):
+            severity_raw = _score_from_severity(sev_val)
+        else:
+            severity_raw = float(sev_val)
 
         event = DisruptionEvent(
             id=str(event_data.get("id", "")),
@@ -204,9 +250,35 @@ class IncidentEngine:
             url=str(event_data.get("url", "")),
         )
 
-        # Skip zero-location events
-        if event.lat == 0 and event.lng == 0:
-            return None
+        # Resolve zero-location events to country centroids
+        if event.lat == 0.0 and event.lng == 0.0:
+            COUNTRY_CENTROIDS = {
+                "india": (20.5937, 78.9629),
+                "in": (20.5937, 78.9629),
+                "germany": (51.1657, 10.4515),
+                "de": (51.1657, 10.4515),
+                "japan": (36.2048, 138.2529),
+                "jp": (36.2048, 138.2529),
+                "usa": (37.0902, -95.7129),
+                "us": (37.0902, -95.7129),
+                "united states": (37.0902, -95.7129),
+                "china": (35.8617, 104.1954),
+                "cn": (35.8617, 104.1954),
+                "taiwan": (23.6978, 120.9605),
+                "tw": (23.6978, 120.9605),
+                "vietnam": (14.0583, 108.2772),
+                "vn": (14.0583, 108.2772),
+            }
+            country_term = str(event_data.get("region") or event_data.get("location") or "").strip().lower()
+            if not country_term:
+                for cname in COUNTRY_CENTROIDS:
+                    if cname in event.title.lower():
+                        country_term = cname
+                        break
+            if country_term in COUNTRY_CENTROIDS:
+                event.lat, event.lng = COUNTRY_CENTROIDS[country_term]
+            else:
+                return None
 
         # Step 1: Build bounded subgraph (mitigating OOM)
         graph = self._build_subgraph(event, suppliers)

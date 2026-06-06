@@ -738,19 +738,19 @@ FETCH_SCHEDULE = [
     (fetch_eonet,                  30,  "NASA EONET natural hazards"),
     (fetch_earthquakes,            15,  "USGS earthquakes"),
     (fetch_gdacs,                  30,  "GDACS global disasters"),
-    (fetch_active_fires,          120,  "NASA FIRMS fires"),
-    (fetch_conflict_events,       120,  "ACLED conflict events"),
-    (fetch_gdelt,                  60,  "GDELT geopolitical"),
+    (fetch_active_fires,           30,  "NASA FIRMS fires"),
+    (fetch_conflict_events,        30,  "ACLED conflict events"),
+    (fetch_gdelt,                  30,  "GDELT geopolitical"),
     (fetch_supply_chain_news,      30,  "NewsAPI supply chain"),
     (fetch_market_quotes,          15,  "Finnhub market quotes"),
-    (fetch_energy_prices,          60,  "EIA energy prices"),
-    (fetch_macro,                 240,  "FRED macro indicators"),
-    (fetch_air_quality,           120,  "OpenAQ air quality"),
-    (fetch_aviation,               60,  "AviationStack flights"),
+    (fetch_energy_prices,          30,  "EIA energy prices"),
+    (fetch_macro,                  30,  "FRED macro indicators"),
+    (fetch_air_quality,            30,  "OpenAQ air quality"),
+    (fetch_aviation,               30,  "AviationStack flights"),
     (score_chokepoints,            15,  "Chokepoint risk scoring"),
     (compute_country_instability,  30,  "Country instability index"),
     (estimate_shipping_stress,     15,  "Shipping stress estimate"),
-    (generate_market_implications, 60,  "Market implications"),
+    (generate_market_implications, 30,  "Market implications"),
     (compute_strategic_risk,       15,  "Strategic risk composite"),
 ]
 
@@ -787,6 +787,9 @@ async def worldmonitor_cron_loop():
                 _last_run[fn_key] = now
                 try:
                     await fn()
+                    # Broadcast to let frontend know data has changed!
+                    from services.event_bus import broadcast_all
+                    await broadcast_all("worldmonitor_updated", {"fetcher": fn_key})
                 except Exception as e:
                     logger.error(f"[worldmonitor] {desc} cron failed: {e}")
 

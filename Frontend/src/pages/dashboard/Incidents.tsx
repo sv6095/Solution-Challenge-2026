@@ -131,19 +131,27 @@ const MODE_ICONS: Record<string, React.ElementType> = { air: Plane, sea: Ship, l
 const Incidents = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("id");
-  const [statusFilter, setStatusFilter] = useState<string>("");
+  const [statusFilter, setStatusFilter] = useState<string>("ACTIVE");
   const [rfqExpanded, setRfqExpanded] = useState(false);
   const [approveLoading, setApproveLoading] = useState(false);
   const [executionResult, setExecutionResult] = useState<Record<string, unknown> | null>(null);
   const qc = useQueryClient();
   const navigate = useNavigate();
 
+  // "ACTIVE" is a virtual filter that fetches all and filters client-side
+  const activeStatuses = ["DETECTED", "ANALYZED", "AWAITING_APPROVAL"];
+  const fetchStatusParam = statusFilter === "ACTIVE" ? undefined : (statusFilter || undefined);
+
   const { data: incidentsRaw = [] } = useQuery({
     queryKey: ["incidents", statusFilter],
-    queryFn: () => fetchIncidents(statusFilter || undefined),
+    queryFn: () => fetchIncidents(fetchStatusParam),
     refetchInterval: 15_000,
   });
-  const incidents: Record<string, unknown>[] = Array.isArray(incidentsRaw) ? incidentsRaw as Record<string, unknown>[] : [];
+  const incidentsAll: Record<string, unknown>[] = Array.isArray(incidentsRaw) ? incidentsRaw as Record<string, unknown>[] : [];
+  // When "ACTIVE" filter is selected, only show non-resolved/non-dismissed incidents
+  const incidents = statusFilter === "ACTIVE"
+    ? incidentsAll.filter((inc) => activeStatuses.includes(String(inc.status || "")))
+    : incidentsAll;
 
   const { data: detail, refetch: refetchDetail } = useQuery<Incident>({
     queryKey: ["incident", selectedId],
@@ -185,7 +193,7 @@ const Incidents = () => {
     }
   }, [incidents, selectedId, setSearchParams]);
 
-  const statuses = ["", "AWAITING_APPROVAL", "ANALYZED", "APPROVED", "RESOLVED", "DISMISSED"];
+  const statuses = ["ACTIVE", "", "AWAITING_APPROVAL", "ANALYZED", "APPROVED", "RESOLVED", "DISMISSED"];
   const canExecuteIncident =
     detail?.status === "AWAITING_APPROVAL" &&
     String(detail?.simulation_outcome || "").toLowerCase() !== "no_impact" &&

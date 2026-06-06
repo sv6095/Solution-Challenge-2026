@@ -237,6 +237,10 @@ def init_local_store() -> None:
             )
             """
         )
+        try:
+            con.execute("ALTER TABLE graph_nodes ADD COLUMN duns_number TEXT")
+        except Exception:
+            pass
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS graph_edges (
@@ -601,6 +605,15 @@ def replace_active_signals(items: list[dict[str, Any]]) -> None:
                 (signal_id, json.dumps(payload), now),
             )
 
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        if loop.is_running():
+            from services.event_bus import broadcast_all
+            loop.create_task(broadcast_all("signal_detected", {"count": len(deduped)}))
+    except RuntimeError:
+        pass
+
 
 def purge_archived_signals(days: int = 7) -> int:
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
@@ -870,6 +883,25 @@ def upsert_incident(incident_id: str, payload: dict[str, Any], status: str, seve
             """,
             (incident_id, tenant_id, json.dumps(payload), status, severity, now, now),
         )
+
+    try:
+        import asyncio
+        loop = asyncio.get_running_loop()
+        if loop.is_running():
+            from services.event_bus import broadcast
+            if status.upper() == "RESOLVED":
+                event_type = "incident_resolved"
+            elif status.upper() in ["ACTIVE", "DETECTED", "CREATED"]:
+                event_type = "incident_created"
+            else:
+                event_type = "incident_updated"
+            
+            loop.create_task(broadcast(tenant_id, event_type, {"incident_id": incident_id, "status": status, "severity": severity}))
+            if tenant_id != "default":
+                loop.create_task(broadcast("default", event_type, {"incident_id": incident_id, "status": status, "severity": severity}))
+    except RuntimeError:
+        pass
+
     return {"id": incident_id, "status": status, "updated_at": now}
 
 

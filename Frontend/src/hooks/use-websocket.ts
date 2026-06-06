@@ -39,8 +39,11 @@ const MAX_RECONNECT_DELAY = 30_000;
 
 function _getWsUrl(tenantId: string): string {
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  const host = import.meta.env.VITE_API_BASE?.replace(/^https?:\/\//, "")
-    || window.location.host;
+  const apiBase = import.meta.env.VITE_API_BASE
+    || import.meta.env.VITE_API_URL
+    || import.meta.env.VITE_API_BASE_URL;
+
+  const host = apiBase?.replace(/^https?:\/\//, "") || window.location.host;
   // Strip trailing /api if present
   const cleanHost = host.replace(/\/api\/?$/, "");
   return `${proto}//${cleanHost}/ws/${tenantId}`;
@@ -200,14 +203,53 @@ export function useWSQueryInvalidation(
 
     // Map WS event types to React Query cache keys for automatic invalidation
     const invalidationMap: Record<string, string[][]> = {
-      incident_created: [["incidents"], ["dashboard", "kpis"]],
-      incident_updated: [["incidents"], ["dashboard", "kpis"]],
-      incident_resolved: [["incidents"], ["dashboard", "kpis"]],
+      incident_created: [
+        ["incidents"],
+        ["dashboard", "kpis"],
+        ["command"],
+        ["risks", "events"],
+        ["incident-summary-nav"]
+      ],
+      incident_updated: [
+        ["incidents"],
+        ["dashboard", "kpis"],
+        ["command"],
+        ["risks", "events"],
+        ["incident-summary-nav"]
+      ],
+      incident_resolved: [
+        ["incidents"],
+        ["dashboard", "kpis"],
+        ["command"],
+        ["risks", "events"],
+        ["incident-summary-nav"]
+      ],
       reasoning_step: [["reasoning"]],
-      checkpoint_raised: [["governance", "checkpoints"]],
+      checkpoint_raised: [
+        ["governance", "checkpoints"],
+        ["governance-checkpoints-nav"]
+      ],
       threshold_tuned: [["governance", "thresholds"]],
-      signal_detected: [["signals"], ["dashboard", "events"]],
+      signal_detected: [
+        ["signals"],
+        ["dashboard", "events"],
+        ["risks", "events"],
+        ["g"]
+      ],
       rfq_sent: [["rfq"]],
+      worldmonitor_updated: [
+        ["g"],
+        ["marketImplications"],
+        ["marketQuotes"],
+        ["macro"],
+        ["energy"],
+        ["supplyChainNews"],
+        ["conflict"],
+        ["minerals"],
+        ["risks", "events"],
+        ["risks", "suppliers"],
+        ["command"]
+      ]
     };
 
     const keys = invalidationMap[lastEvent.type];
