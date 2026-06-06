@@ -1,12 +1,14 @@
 import { Outlet, Link, useLocation, useNavigate } from "react-router-dom";
-import { useState, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Crosshair, Network, AlertTriangle, Radar, Shield,
-  Settings, Bell, ShieldAlert, Wifi, LogOut, User, Clock,
+  Settings, Bell, Menu, ChevronLeft, ShieldAlert, Wifi, WifiOff,
+  Send, CheckCircle, LogOut, User, Clock,
 } from "lucide-react";
 import { api, getAccessToken, getUserId, getDisplayName, clearAuthSession } from "@/lib/api";
-import { useWSQueryInvalidation } from "@/hooks/use-websocket";
+import { useWSQueryInvalidation, useWebSocket } from "@/hooks/use-websocket";
+import { toast } from "@/components/ui/sonner";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import {
   DropdownMenu,
@@ -36,6 +38,65 @@ const NAV_ITEMS = [
   { title: "Compliance",   icon: Shield,        path: "/dashboard/compliance",  description: "Audit & export" },
 ];
 
+interface DashboardNotification {
+  id: string;
+  title: string;
+  description: string;
+  type: string;
+  timestamp: string;
+  read: boolean;
+  link?: string;
+}
+
+const getNotificationIcon = (type: string) => {
+  switch (type) {
+    case "incident":
+      return AlertTriangle;
+    case "checkpoint":
+      return Shield;
+    case "signal":
+      return Radar;
+    case "rfq":
+      return Send;
+    case "resolved":
+      return CheckCircle;
+    default:
+      return AlertTriangle;
+  }
+};
+
+const getNotificationIconColor = (type: string) => {
+  switch (type) {
+    case "incident":
+      return "text-red-500";
+    case "checkpoint":
+      return "text-orange-500";
+    case "signal":
+      return "text-blue-500";
+    case "rfq":
+      return "text-indigo-500";
+    case "resolved":
+      return "text-green-500";
+    default:
+      return "text-slate-500";
+  }
+};
+
+const formatTimeAgo = (timestampStr: string) => {
+  try {
+    const date = new Date(timestampStr);
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+    if (seconds < 60) return "just now";
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}m ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  } catch (e) {
+    return "";
+  }
+};
+
 const PING_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 const DashboardLayout = () => {
@@ -46,8 +107,21 @@ const DashboardLayout = () => {
   const queryClient = useQueryClient();
 
   const tenantId = getUserId();
-  const { isConnected: wsConnected } = useWSQueryInvalidation(tenantId, queryClient);
+  useWSQueryInvalidation(tenantId, queryClient);
+  const { lastEvent, isConnected: wsConnected } = useWebSocket(tenantId);
   const hasToken = Boolean(getAccessToken());
+
+  // ── Notification State ──
+  const [notifications, setNotifications] = useState<DashboardNotification[]>(() => {
+    try {
+      const stored = localStorage.getItem("dashboard_notifications");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const lastEventRef = useRef<string | null>(null);
 
   // ── Keep Render backend alive — ping every 5 minutes ─────────────────────
   useEffect(() => {
@@ -81,6 +155,161 @@ const DashboardLayout = () => {
   const pendingChkCount = checkpointData?.count ?? 0;
   const pendingChks: { checkpoint_id: string; incident_id: string; risk_level: string; risk_trigger: string }[] =
     checkpointData?.pending ?? [];
+
+  // Seed notifications with pending checkpoints if list is empty
+  useEffect(() => {
+    if (pendingChks.length > 0 && notifications.length === 0) {
+      const seeded = pendingChks.map((chk) => ({
+        id: `seeded-${chk.checkpoint_id}`,
+        title: `Pending Checkpoint — ${chk.risk_level}`,
+        description: chk.risk_trigger,
+        type: "checkpoint",
+        timestamp: new Date().toISOString(),
+        read: false,
+        link: "/dashboard/compliance",
+      }));
+      setNotifications(seeded);
+      localStorage.setItem("dashboard_notifications", JSON.stringify(seeded));
+    }
+  }, [pendingChks, notifications.length]);
+
+  // Handle incoming WebSocket events
+  useEffect(() => {
+    if (!lastEvent) return;
+    
+    // Uniquely identify the event to prevent duplicate logic execution
+    const eventKey = `${lastEvent.type}-${lastEvent.timestamp}`;
+    if (lastEventRef.current === eventKey) return;
+    lastEventRef.current = eventKey;
+
+    const eventTime = new Date(lastEvent.timestamp).getTime();
+    const nowTime = Date.now();
+    const isRecent = nowTime - eventTime < 30_000;
+
+    let notificationTitle = "";
+    let notificationDesc = "";
+    let notificationLink = "";
+    let iconType = "incident";
+
+    const payload = lastEvent.payload || {};
+
+    switch (lastEvent.type) {
+      case "incident_created": {
+        const severity = String(payload.severity || "LOW").toUpperCase();
+        notificationTitle = "New Incident Detected";
+        notificationDesc = `Incident ${payload.incident_id || ""} (${severity}) requires review.`;
+        notificationLink = `/dashboard/incidents?id=${payload.incident_id || ""}`;
+        iconType = "incident";
+        break;
+      }
+      case "checkpoint_raised": {
+        notificationTitle = "Governance Checkpoint Raised";
+        notificationDesc = `Checkpoint: ${payload.checkpoint_id || "Action pending review"}`;
+        notificationLink = "/dashboard/compliance";
+        iconType = "checkpoint";
+        break;
+      }
+      case "signal_detected": {
+        const count = payload.count || 1;
+        notificationTitle = "Intelligence Signals Polled";
+        notificationDesc = `Detected ${count} active signal stream${count > 1 ? "s" : ""}.`;
+        notificationLink = "/dashboard/intelligence";
+        iconType = "signal";
+        break;
+      }
+      case "rfq_sent": {
+        notificationTitle = "RFQ Email Sent";
+        notificationDesc = `RFQ sent to ${payload.recipient || "supplier"}.`;
+        notificationLink = `/dashboard/incidents?id=${payload.incident_id || ""}`;
+        iconType = "rfq";
+        break;
+      }
+      case "incident_resolved": {
+        notificationTitle = "Incident Resolved";
+        notificationDesc = `Incident ${payload.incident_id || ""} has been resolved.`;
+        notificationLink = `/dashboard/incidents?id=${payload.incident_id || ""}`;
+        iconType = "resolved";
+        break;
+      }
+      case "incident_updated": {
+        notificationTitle = "Incident Updated";
+        notificationDesc = `Incident ${payload.incident_id || ""} status updated to ${payload.status || ""}.`;
+        notificationLink = `/dashboard/incidents?id=${payload.incident_id || ""}`;
+        iconType = "updated";
+        break;
+      }
+      case "threshold_tuned": {
+        notificationTitle = "Thresholds Auto-Tuned";
+        notificationDesc = `Scoring sensitivity thresholds have been updated.`;
+        notificationLink = "/dashboard/compliance";
+        iconType = "checkpoint";
+        break;
+      }
+      default:
+        return;
+    }
+
+    if (notificationTitle) {
+      const newNotification: DashboardNotification = {
+        id: `${lastEvent.type}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        title: notificationTitle,
+        description: notificationDesc,
+        type: iconType,
+        timestamp: new Date().toISOString(),
+        read: false,
+        link: notificationLink,
+      };
+
+      setNotifications((prev) => {
+        const updated = [newNotification, ...prev].slice(0, 100);
+        localStorage.setItem("dashboard_notifications", JSON.stringify(updated));
+        return updated;
+      });
+
+      if (isRecent) {
+        toast(notificationTitle, {
+          description: notificationDesc,
+          action: notificationLink ? {
+            label: "View",
+            onClick: () => {
+              navigate(notificationLink);
+            }
+          } : undefined
+        });
+      }
+    }
+  }, [lastEvent, navigate]);
+
+  const markAllAsRead = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNotifications((prev) => {
+      const updated = prev.map((n) => ({ ...n, read: true }));
+      localStorage.setItem("dashboard_notifications", JSON.stringify(updated));
+      return updated;
+    });
+  };
+
+  const clearNotifications = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNotifications([]);
+    localStorage.removeItem("dashboard_notifications");
+  };
+
+  const handleNotificationClick = (notification: DashboardNotification) => {
+    setNotifications((prev) => {
+      const updated = prev.map((n) =>
+        n.id === notification.id ? { ...n, read: true } : n
+      );
+      localStorage.setItem("dashboard_notifications", JSON.stringify(updated));
+      return updated;
+    });
+    setPopoverOpen(false);
+    if (notification.link) {
+      navigate(notification.link);
+    }
+  };
+
+  const unreadCount = notifications.filter((n) => !n.read).length;
 
   // ── Logout ────────────────────────────────────────────────────────────────
   function handleLogout() {
@@ -205,56 +434,93 @@ const DashboardLayout = () => {
           <div className="flex items-center gap-3">
 
             {/* ── Notification bell ── */}
-            <Popover>
+            <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
               <PopoverTrigger asChild>
                 <button
                   aria-label="Notifications"
-                  className="relative text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer"
+                  className="relative text-muted-foreground hover:text-foreground transition-colors duration-150 cursor-pointer p-1"
                 >
                   <Bell size={16} />
-                  {pendingChkCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-red-500 rounded-full border border-card flex items-center justify-center">
+                      <span className="absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75 animate-ping" />
+                    </span>
                   )}
                 </button>
               </PopoverTrigger>
               <PopoverContent align="end" className="w-80 p-0">
-                <div className="px-4 py-3 border-b border-border">
+                <div className="px-4 py-3 border-b border-border flex items-center justify-between">
                   <p className="text-xs font-headline font-bold uppercase tracking-widest text-foreground">
-                    Notifications
+                    Notifications ({unreadCount})
                   </p>
+                  <div className="flex gap-2">
+                    {notifications.length > 0 && (
+                      <button
+                        onClick={markAllAsRead}
+                        className="text-[9px] font-mono font-bold text-red-500 hover:text-red-600 transition-colors uppercase tracking-wider cursor-pointer"
+                      >
+                        Mark all read
+                      </button>
+                    )}
+                    {notifications.length > 0 && (
+                      <button
+                        onClick={clearNotifications}
+                        className="text-[9px] font-mono font-bold text-slate-400 hover:text-slate-600 transition-colors uppercase tracking-wider cursor-pointer"
+                        title="Clear all"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
                 </div>
-                <div className="max-h-72 overflow-y-auto divide-y divide-border">
-                  {pendingChks.length === 0 ? (
+                <div className="max-h-72 overflow-y-auto divide-y divide-border custom-scrollbar">
+                  {notifications.length === 0 ? (
                     <div className="px-4 py-6 text-center">
                       <Bell size={20} className="mx-auto mb-2 text-muted-foreground/40" />
-                      <p className="text-xs text-muted-foreground">No pending notifications</p>
+                      <p className="text-xs text-muted-foreground font-mono">No new notifications</p>
                     </div>
                   ) : (
-                    pendingChks.map((chk) => (
-                      <Link
-                        key={chk.checkpoint_id}
-                        to="/dashboard/compliance"
-                        className="flex items-start gap-3 px-4 py-3 hover:bg-muted transition-colors"
-                      >
-                        <ShieldAlert size={14} className="text-orange-500 mt-0.5 shrink-0" />
-                        <div className="min-w-0">
-                          <p className="text-xs font-semibold text-foreground truncate">
-                            Checkpoint — {chk.risk_level}
-                          </p>
-                          <p className="text-[11px] text-muted-foreground truncate">{chk.risk_trigger}</p>
-                          <p className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono">
-                            {chk.incident_id}
-                          </p>
+                    notifications.map((chk) => {
+                      const Icon = getNotificationIcon(chk.type);
+                      const iconColor = getNotificationIconColor(chk.type);
+                      return (
+                        <div
+                          key={chk.id}
+                          onClick={() => handleNotificationClick(chk)}
+                          className={`flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors cursor-pointer relative ${
+                            !chk.read ? "bg-red-500/[0.02]" : ""
+                          }`}
+                        >
+                          {!chk.read && (
+                            <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-red-500 rounded-full" />
+                          )}
+                          <div className={`p-1.5 rounded bg-muted border border-border mt-0.5 shrink-0 ${iconColor}`}>
+                            <Icon size={12} />
+                          </div>
+                          <div className="min-w-0 flex-1 pl-1">
+                            <p className={`text-xs truncate ${!chk.read ? "font-bold text-foreground" : "font-semibold text-slate-500"}`}>
+                              {chk.title}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5 leading-snug">
+                              {chk.description}
+                            </p>
+                            <span className="text-[9px] font-mono text-slate-400/80 mt-1 block">
+                              {formatTimeAgo(chk.timestamp)}
+                            </span>
+                          </div>
                         </div>
-                      </Link>
-                    ))
+                      );
+                    })
                   )}
                 </div>
-                <div className="px-4 py-2 border-t border-border flex items-center gap-1.5">
-                  <Clock size={10} className="text-muted-foreground/50" />
-                  <span className="text-[10px] text-muted-foreground/50 font-headline">
-                    {wsConnected ? "Live updates on" : "Polling every 30 s"}
-                  </span>
+                <div className="px-4 py-2 border-t border-border flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Clock size={10} className="text-muted-foreground/50" />
+                    <span className="text-[10px] text-muted-foreground/50 font-headline font-bold uppercase tracking-wider">
+                      {wsConnected ? "Live updates on" : "Polling every 30 s"}
+                    </span>
+                  </div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                 </div>
               </PopoverContent>
             </Popover>
