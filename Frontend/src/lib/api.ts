@@ -925,6 +925,7 @@ export const api = {
     chokepoints: () => request<{ data: ScoredChokepoint[] }>("/global/chokepoints"),
     shippingStress: () => request<ShippingStress>("/global/shipping/stress"),
     shippingIndices: () => request<{ data: ShippingIndex[] }>("/global/shipping/indices"),
+    shippingRates: () => request<ShippingRatesResponse>("/global/shipping/rates"),
     countryInstability: () => request<{ data: CountryInstability[] }>("/global/country-instability"),
     strategicRisk: () => request<StrategicRisk>("/global/strategic-risk"),
     marketImplications: () => request<MarketImplications>("/global/market-implications"),
@@ -984,7 +985,20 @@ export interface ScoredChokepoint {
   id: string; name: string; lng: number; lat: number;
   traffic_pct: number; category: string; risk_score: number;
   trend: string; eonet_nearby?: number; acled_nearby?: number;
-  last_scored?: string;
+  wow_change_pct?: number; war_risk_tier?: string;
+  latest_transit_count?: number; last_scored?: string;
+}
+
+export interface ShippingRateIndex {
+  id: string; name: string; unit: string;
+  value?: string | number | null; change_pct?: number | null;
+  fetched_at?: string;
+}
+
+export interface ShippingRatesResponse {
+  indices: ShippingRateIndex[];
+  fetched_at: string;
+  upstream_unavailable?: boolean;
 }
 
 export interface ShippingStress {
@@ -1057,6 +1071,7 @@ export interface GlobalDashboardBundle {
   chokepoints: { data: ScoredChokepoint[]; source: string };
   shipping_stress: ShippingStress;
   shipping_indices: { data: ShippingIndex[] };
+  shipping_rates?: ShippingRatesResponse;
   country_instability: { data: CountryInstability[] };
   strategic_risk: StrategicRisk;
   market_implications: MarketImplications;

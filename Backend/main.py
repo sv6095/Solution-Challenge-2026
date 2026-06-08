@@ -131,7 +131,7 @@ from services.worldmonitor_fetcher import (
     get_chokepoint_status, get_shipping_stress, get_country_instability,
     get_strategic_risk, get_market_implications, get_active_fires,
     get_aviation_intel, get_air_quality, get_critical_minerals,
-    get_shipping_indices, run_all_fetchers_once,
+    get_shipping_indices, get_shipping_rates, run_all_fetchers_once,
 )
 
 init_store()
@@ -3754,6 +3754,17 @@ async def api_global_shipping_indices(response: Response):
     )
 
 
+@app.get("/api/global/shipping/rates")
+async def api_global_shipping_rates(response: Response):
+    """Live shipping index values (FRED proxies + index registry)."""
+    return await _cached_global_response(
+        response,
+        "shipping-rates",
+        get_shipping_rates,
+        ttl_seconds=300,
+    )
+
+
 @app.get("/api/global/country-instability")
 async def api_global_country_instability(response: Response):
     """Country instability ranked list (ACLED + EONET aggregate)."""
@@ -3886,6 +3897,7 @@ async def api_global_dashboard_bundle(response: Response):
             "chokepoints": {"data": get_chokepoint_status(), "source": "Praecantator"},
             "shipping_stress": get_shipping_stress(),
             "shipping_indices": {"data": get_shipping_indices()},
+            "shipping_rates": get_shipping_rates(),
             "country_instability": {"data": get_country_instability()},
             "strategic_risk": get_strategic_risk(),
             "market_implications": get_market_implications(),

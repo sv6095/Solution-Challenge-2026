@@ -2196,7 +2196,7 @@ export default function NetworkView() {
     const dot = rs >= 70 ? "#e74c3c" : rs >= 40 ? "#f59e0b" : "#27ae60";
     const statusLabel = rs >= 70 ? "red" : rs >= 40 ? "yellow" : "green";
     const tc = cp.traffic_pct ?? 0;
-    const wowPct = 0; // not in our schema yet
+    const wowPct = cp.wow_change_pct ?? 0;
     const acledNearby = cp.acled_nearby ?? 0;
     const eonetNearby = cp.eonet_nearby ?? 0;
 
@@ -2228,6 +2228,7 @@ export default function NetworkView() {
         <div style={{ marginTop:4, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap", fontSize:12, color:"var(--text-dim)" }}>
           <span>{cp.category}</span>
           {tc > 0 && <span>Traffic: {tc}%</span>}
+          {wowPct !== 0 && <span style={{ color: wowPct < 0 ? "#ef4444" : "#10b981" }}>{wowPct < 0 ? "▼" : "▲"} {Math.abs(wowPct).toFixed(1)}% WoW</span>}
           {eonetNearby > 0 && <span style={{ color:"#f59e0b" }}>⚡ {eonetNearby} nearby events</span>}
           {acledNearby > 0 && <span style={{ color:"#ef4444" }}>⚔ {acledNearby} conflicts</span>}
           {cp.trend && <span style={{ color:cp.trend==="up"?"var(--threat-critical)":cp.trend==="down"?"var(--semantic-normal)":"var(--text-dim)" }}>

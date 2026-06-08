@@ -68,9 +68,11 @@ _READ_CACHE_LOCK = Lock()
 
 ACLED_API_KEY    = os.getenv("ACLED_API_KEY", "")
 ACLED_EMAIL      = os.getenv("ACLED_EMAIL", "")
+ACLED_PASSWORD   = os.getenv("ACLED_PASSWORD", "")
+ACLED_ACCESS_TOKEN = os.getenv("ACLED_ACCESS_TOKEN", "")
 NEWSAPI_KEY      = os.getenv("NEWSAPI_API_KEY", os.getenv("NEWSAPI_KEY", ""))
 GNEWS_KEY        = os.getenv("GNEWS_API_KEY", "")
-NASA_FIRMS_KEY   = os.getenv("NASA_FIRMS_MAP_KEY", "")
+NASA_FIRMS_KEY   = os.getenv("NASA_FIRMS_MAP_KEY", os.getenv("NASA_FIRMS_API_KEY", ""))
 FINNHUB_KEY      = os.getenv("FINNHUB_API_KEY", "")
 EIA_KEY          = os.getenv("EIA_API_KEY", "")
 FRED_KEY         = os.getenv("FRED_API_KEY", "")
@@ -80,19 +82,27 @@ CLOUDFLARE_TOKEN = os.getenv("CLOUDFLARE_API_TOKEN", "")
 AISSTREAM_KEY    = os.getenv("AISSTREAM_API_KEY", "")
 GROQ_KEY         = os.getenv("GROQ_API_KEY", "")
 
-# ── Chokepoint geometry (worldmonitor static reference) ───────────────────────
+PORTWATCH_TRANSIT_URL = (
+    "https://services9.arcgis.com/weJ1QsnbMYJlCHdG/arcgis/rest/services/"
+    "Daily_Chokepoints_Data/FeatureServer/0/query"
+)
+
+# ── Canonical chokepoints (worldmonitor chokepoint-registry.ts) ───────────────
 
 CHOKEPOINTS = [
-    {"id": "hormuz",  "name": "Strait of Hormuz",   "lng": 56.4,  "lat": 26.6,  "traffic_pct": 22, "category": "oil"},
-    {"id": "suez",    "name": "Suez Canal",          "lng": 32.6,  "lat": 30.0,  "traffic_pct": 12, "category": "trade"},
-    {"id": "malacca", "name": "Strait of Malacca",   "lng": 103.5, "lat": 2.5,   "traffic_pct": 30, "category": "trade"},
-    {"id": "bab",     "name": "Bab el-Mandeb",       "lng": 43.2,  "lat": 12.5,  "traffic_pct": 9,  "category": "oil"},
-    {"id": "taiwan",  "name": "Taiwan Strait",        "lng": 120.5, "lat": 24.2,  "traffic_pct": 48, "category": "semiconductors"},
-    {"id": "panama",  "name": "Panama Canal",         "lng": -79.8, "lat": 9.1,   "traffic_pct": 5,  "category": "trade"},
-    {"id": "dover",   "name": "Strait of Dover",      "lng": 1.6,   "lat": 51.0,  "traffic_pct": 8,  "category": "trade"},
-    {"id": "lombok",  "name": "Lombok Strait",        "lng": 115.7, "lat": -8.5,  "traffic_pct": 4,  "category": "oil"},
-    {"id": "luzon",   "name": "Luzon Strait",         "lng": 121.5, "lat": 20.5,  "traffic_pct": 3,  "category": "trade"},
-    {"id": "turkish", "name": "Turkish Straits",      "lng": 29.0,  "lat": 41.0,  "traffic_pct": 3,  "category": "oil"},
+    {"id": "suez",              "name": "Suez Canal",           "lng": 32.3,   "lat": 30.5,   "traffic_pct": 12, "category": "trade",          "portwatch_name": "Suez Canal"},
+    {"id": "malacca_strait",    "name": "Strait of Malacca",    "lng": 101.5,  "lat": 2.5,    "traffic_pct": 30, "category": "trade",          "portwatch_name": "Malacca Strait"},
+    {"id": "hormuz_strait",     "name": "Strait of Hormuz",     "lng": 56.5,   "lat": 26.5,   "traffic_pct": 22, "category": "oil",            "portwatch_name": "Strait of Hormuz"},
+    {"id": "bab_el_mandeb",     "name": "Bab el-Mandeb",        "lng": 43.3,   "lat": 12.5,   "traffic_pct": 9,  "category": "oil",            "portwatch_name": "Bab el-Mandeb Strait"},
+    {"id": "panama",            "name": "Panama Canal",         "lng": -79.7,  "lat": 9.1,    "traffic_pct": 5,  "category": "trade",          "portwatch_name": "Panama Canal"},
+    {"id": "taiwan_strait",     "name": "Taiwan Strait",        "lng": 119.5,  "lat": 24.0,   "traffic_pct": 48, "category": "semiconductors", "portwatch_name": "Taiwan Strait"},
+    {"id": "cape_of_good_hope", "name": "Cape of Good Hope",    "lng": 18.49,  "lat": -34.36, "traffic_pct": 6,  "category": "trade",          "portwatch_name": "Cape of Good Hope"},
+    {"id": "gibraltar",         "name": "Strait of Gibraltar",  "lng": -5.6,   "lat": 35.9,   "traffic_pct": 8,  "category": "trade",          "portwatch_name": "Gibraltar Strait"},
+    {"id": "bosphorus",         "name": "Bosporus Strait",      "lng": 29.0,   "lat": 41.1,   "traffic_pct": 3,  "category": "oil",            "portwatch_name": "Bosporus Strait"},
+    {"id": "korea_strait",      "name": "Korea Strait",         "lng": 129.0,  "lat": 34.0,   "traffic_pct": 4,  "category": "trade",          "portwatch_name": "Korea Strait"},
+    {"id": "dover_strait",      "name": "Dover Strait",         "lng": 1.5,    "lat": 51.0,   "traffic_pct": 8,  "category": "trade",          "portwatch_name": "Dover Strait"},
+    {"id": "kerch_strait",      "name": "Kerch Strait",         "lng": 36.6,   "lat": 45.3,   "traffic_pct": 2,  "category": "trade",          "portwatch_name": "Kerch Strait"},
+    {"id": "lombok_strait",     "name": "Lombok Strait",        "lng": 115.7,  "lat": -8.5,   "traffic_pct": 4,  "category": "oil",            "portwatch_name": "Lombok Strait"},
 ]
 
 # ── Shipping indices (worldmonitor tracks these) ──────────────────────────────
@@ -314,30 +324,72 @@ async def fetch_active_fires():
 
 # ── Armed Conflict (ACLED) ────────────────────────────────────────────────────
 
+async def _fetch_acled_access_token(client: httpx.AsyncClient) -> str:
+    if ACLED_ACCESS_TOKEN:
+        return ACLED_ACCESS_TOKEN
+    if not ACLED_EMAIL or not ACLED_PASSWORD:
+        return ""
+    try:
+        resp = await client.post(
+            "https://acleddata.com/oauth/token",
+            data={"email": ACLED_EMAIL, "password": ACLED_PASSWORD},
+            headers={"Accept": "application/json"},
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception:
+        return ""
+    return str(
+        payload.get("access_token")
+        or payload.get("token")
+        or payload.get("data", {}).get("access_token")
+        or ""
+    ).strip()
+
+
 async def fetch_conflict_events():
-    """ACLED — armed conflict & protest events (last 7 days)."""
-    if not ACLED_API_KEY or not ACLED_EMAIL:
+    """ACLED — armed conflict & protest events (current month, OAuth or legacy key)."""
+    if not ((ACLED_EMAIL and ACLED_PASSWORD) or (ACLED_API_KEY and ACLED_EMAIL) or ACLED_ACCESS_TOKEN):
         return
-    url = (
-        f"https://api.acleddata.com/acled/read?"
-        f"key={ACLED_API_KEY}&email={ACLED_EMAIL}"
-        f"&event_date=2024-01-01&event_date_where=BETWEEN&event_date=2024-12-31"
-        f"&limit=100&fields=event_id_cnty|event_date|event_type|country|admin1|latitude|longitude|fatalities|notes|source"
-    )
+    now = datetime.now(timezone.utc)
+    params = {
+        "event_type": "Battles|Violence against civilians|Protests|Riots",
+        "event_date": f"{now.strftime('%Y-%m-01')}|{now.strftime('%Y-%m-%d')}",
+        "event_date_where": "BETWEEN",
+        "limit": "100",
+        "_format": "json",
+    }
+    headers = {"Accept": "application/json"}
     async with httpx.AsyncClient() as c:
-        data = await _safe_get(c, url)
+        token = await _fetch_acled_access_token(c)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+            data = await _safe_get(c, "https://acleddata.com/api/acled/read", params=params, headers=headers)
+        elif ACLED_API_KEY and ACLED_EMAIL:
+            params["key"] = ACLED_API_KEY
+            params["email"] = ACLED_EMAIL
+            data = await _safe_get(c, "https://api.acleddata.com/acled/read/", params=params, headers=headers)
+        else:
+            return
     if not data:
         return
     events = []
     for ev in (data.get("data") or []):
+        try:
+            lat = float(ev.get("latitude", 0) or 0)
+            lng = float(ev.get("longitude", 0) or 0)
+        except (TypeError, ValueError):
+            lat, lng = 0.0, 0.0
         events.append({
-            "id": ev.get("event_id_cnty"), "date": ev.get("event_date"),
-            "type": ev.get("event_type"), "country": ev.get("country"),
+            "id": ev.get("event_id_cnty"),
+            "date": ev.get("event_date"),
+            "type": ev.get("event_type"),
+            "country": ev.get("country"),
             "region": ev.get("admin1"),
-            "lat": float(ev.get("latitude", 0) or 0),
-            "lng": float(ev.get("longitude", 0) or 0),
+            "lat": lat,
+            "lng": lng,
             "fatalities": int(ev.get("fatalities", 0) or 0),
-            "notes": ev.get("notes", "")[:300],
+            "notes": str(ev.get("notes", ""))[:300],
             "source": "ACLED",
         })
     _db_upsert("conflict", "acled_events", events)
@@ -392,32 +444,51 @@ async def fetch_gdelt():
 # ── Supply Chain News (NewsAPI) ───────────────────────────────────────────────
 
 async def fetch_supply_chain_news():
-    """NewsAPI — supply chain disruption headlines."""
-    if not NEWSAPI_KEY:
-        return
-    url = (
-        f"https://newsapi.org/v2/everything?"
-        f"q=supply+chain+OR+chokepoint+OR+shipping+disruption+OR+port+congestion"
-        f"&language=en&sortBy=publishedAt&pageSize=30"
-        f"&apiKey={NEWSAPI_KEY}"
-    )
+    """NewsAPI primary, GNews fallback — supply chain disruption headlines."""
+    articles: list[dict] = []
+    query = "supply chain OR chokepoint OR shipping disruption OR port congestion"
     async with httpx.AsyncClient() as c:
-        data = await _safe_get(c, url)
-    articles = []
-    for art in (data.get("articles") or [] if data else [])[:30]:
-        if not art.get("url") or "[Removed]" in str(art.get("title", "")):
-            continue
-        articles.append({
-            "id": art.get("url"),
-            "title": art.get("title"),
-            "description": art.get("description", "")[:200] if art.get("description") else "",
-            "url": art.get("url"),
-            "source": art.get("source", {}).get("name"),
-            "publishedAt": art.get("publishedAt"),
-            "category": "supply_chain",
-        })
-    _db_upsert("news", "newsapi_supply_chain", articles)
-    logger.info(f"[worldmonitor] NewsAPI: {len(articles)} articles cached")
+        if NEWSAPI_KEY:
+            url = (
+                f"https://newsapi.org/v2/everything?"
+                f"q=supply+chain+OR+chokepoint+OR+shipping+disruption+OR+port+congestion"
+                f"&language=en&sortBy=publishedAt&pageSize=30"
+                f"&apiKey={NEWSAPI_KEY}"
+            )
+            data = await _safe_get(c, url)
+            for art in (data.get("articles") or [] if data else [])[:30]:
+                if not art.get("url") or "[Removed]" in str(art.get("title", "")):
+                    continue
+                articles.append({
+                    "id": art.get("url"),
+                    "title": art.get("title"),
+                    "description": art.get("description", "")[:200] if art.get("description") else "",
+                    "url": art.get("url"),
+                    "source": art.get("source", {}).get("name"),
+                    "publishedAt": art.get("publishedAt"),
+                    "category": "supply_chain",
+                })
+        if len(articles) < 5 and GNEWS_KEY:
+            gnews_url = (
+                "https://gnews.io/api/v4/search?"
+                f"q={query.replace(' ', '%20')}&lang=en&max=20&apikey={GNEWS_KEY}"
+            )
+            data = await _safe_get(c, gnews_url)
+            for art in (data.get("articles") or [] if data else [])[:20]:
+                if not art.get("url"):
+                    continue
+                articles.append({
+                    "id": art.get("url"),
+                    "title": art.get("title"),
+                    "description": str(art.get("description", ""))[:200],
+                    "url": art.get("url"),
+                    "source": art.get("source", {}).get("name") if isinstance(art.get("source"), dict) else art.get("source"),
+                    "publishedAt": art.get("publishedAt"),
+                    "category": "supply_chain",
+                })
+    if articles:
+        _db_upsert("news", "newsapi_supply_chain", articles[:30])
+        logger.info(f"[worldmonitor] Supply-chain news: {len(articles[:30])} articles cached")
 
 
 # ── Market Data (Finnhub) ─────────────────────────────────────────────────────
@@ -447,31 +518,51 @@ async def fetch_market_quotes():
 # ── Energy Prices (EIA) ───────────────────────────────────────────────────────
 
 async def fetch_energy_prices():
-    """EIA — US crude inventories, nat gas, oil price."""
-    if not EIA_KEY:
-        return
-    datasets = {
-        "crude_inventory": f"https://api.eia.gov/v2/petroleum/sum/sndw/data/?frequency=weekly&data[0]=value&facets[series][]=WCESTUS1&offset=0&length=4&api_key={EIA_KEY}",
-        "natgas_storage": f"https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value&facets[series][]=NW2_EPG0_SWO_R48_BCF&offset=0&length=4&api_key={EIA_KEY}",
-    }
-    result = {}
+    """EIA — US crude/natgas; GIE AGSI — EU gas storage (free, no key)."""
+    result: dict[str, Any] = {}
     async with httpx.AsyncClient() as c:
-        for key, url in datasets.items():
-            d = await _safe_get(c, url)
-            if d:
-                result[key] = (d.get("response", {}).get("data") or [])[:4]
+        if EIA_KEY:
+            datasets = {
+                "crude_inventory": f"https://api.eia.gov/v2/petroleum/sum/sndw/data/?frequency=weekly&data[0]=value&facets[series][]=WCESTUS1&offset=0&length=4&api_key={EIA_KEY}",
+                "natgas_storage": f"https://api.eia.gov/v2/natural-gas/stor/wkly/data/?frequency=weekly&data[0]=value&facets[series][]=NW2_EPG0_SWO_R48_BCF&offset=0&length=4&api_key={EIA_KEY}",
+            }
+            for key, url in datasets.items():
+                d = await _safe_get(c, url)
+                if d:
+                    result[key] = (d.get("response", {}).get("data") or [])[:4]
+        # GIE AGSI — EU aggregate gas storage fill % (public API)
+        agsi = await _safe_get(
+            c,
+            "https://agsi.gie.eu/api",
+            params={"from": (datetime.now(timezone.utc).strftime("%Y-%m-%d")), "size": 1, "country": "eu"},
+        )
+        if agsi and agsi.get("data"):
+            latest = agsi["data"][0]
+            result["eu_gas_storage"] = {
+                "full": latest.get("full"),
+                "trend": latest.get("trend"),
+                "date": latest.get("gasDayStart"),
+            }
     if result:
         _db_upsert("energy", "eia_energy", result)
-        logger.info(f"[worldmonitor] EIA: energy data cached")
+        logger.info(f"[worldmonitor] Energy: {list(result.keys())} cached")
 
 
 # ── Macro Indicators (FRED) ───────────────────────────────────────────────────
 
 async def fetch_macro():
-    """FRED — CPI, PMI, unemployment, Baltic Dry Index proxy."""
+    """FRED — macro stress panel series (matches worldmonitor bootstrap macroSignals)."""
     if not FRED_KEY:
         return
-    series = {"ISM_PMI": "MANEMP", "CPI": "CPIAUCSL", "UNRATE": "UNRATE", "PPI": "PPIACO"}
+    # Keys match NetworkView MacroStress panel expectations
+    series = {
+        "VIX": "VIXCLS",
+        "FEDFUNDS": "FEDFUNDS",
+        "T10Y2Y": "T10Y2Y",
+        "UNRATE": "UNRATE",
+        "CPI": "CPIAUCSL",
+        "PPI": "PPIACO",
+    }
     result = {}
     async with httpx.AsyncClient() as c:
         for label, sid in series.items():
@@ -540,6 +631,80 @@ async def fetch_aviation():
         logger.info(f"[worldmonitor] AviationStack: {len(result)} flights cached")
 
 
+# ── PortWatch transit data (IMF — free ArcGIS, no key) ───────────────────────
+
+def _arcgis_timestamp(dt: datetime) -> str:
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def fetch_portwatch_transits():
+    """IMF PortWatch — per-chokepoint week-over-week transit deltas."""
+    since_sql = _arcgis_timestamp(
+        datetime.fromtimestamp(datetime.now(timezone.utc).timestamp() - (14 * 86_400), tz=timezone.utc)
+    )
+    metrics: dict[str, dict] = {}
+    async with httpx.AsyncClient() as c:
+        for cp in CHOKEPOINTS:
+            name = cp.get("portwatch_name") or cp["name"]
+            escaped = name.replace("'", "''")
+            data = await _safe_get(
+                c,
+                PORTWATCH_TRANSIT_URL,
+                params={
+                    "where": f"portname='{escaped}' AND date >= timestamp '{since_sql}'",
+                    "outFields": "date,n_total",
+                    "orderByFields": "date ASC",
+                    "resultRecordCount": "2000",
+                    "f": "json",
+                },
+            )
+            features = (data or {}).get("features") or []
+            if len(features) < 8:
+                continue
+            totals = [float((f.get("attributes") or {}).get("n_total") or 0) for f in features]
+            this_week = sum(totals[-7:])
+            prev_week = sum(totals[-14:-7])
+            wow = ((this_week - prev_week) / prev_week * 100.0) if prev_week > 0 else 0.0
+            metrics[cp["id"]] = {
+                "wow_change_pct": round(wow, 1),
+                "latest_transit_count": round(totals[-1]),
+                "portwatch_name": name,
+            }
+    if metrics:
+        _db_upsert("portwatch", "portwatch_transits", metrics)
+        logger.info(f"[worldmonitor] PortWatch: {len(metrics)} chokepoint transit series cached")
+
+
+# ── Shipping rates (FRED proxies + index metadata) ───────────────────────────
+
+async def fetch_shipping_rates():
+    """Shipping index values — FRED Brent proxy + static index registry."""
+    indices = []
+    fetched_at = datetime.now(timezone.utc).isoformat()
+    async with httpx.AsyncClient() as c:
+        brent_val = None
+        if FRED_KEY:
+            d = await _safe_get(
+                c,
+                f"https://api.stlouisfed.org/fred/series/observations?series_id=DCOILBRENTEU&limit=2&sort_order=desc&api_key={FRED_KEY}&file_type=json",
+            )
+            if d and d.get("observations"):
+                brent_val = d["observations"][0].get("value")
+        for idx in SHIPPING_INDICES:
+            entry = {**idx, "value": None, "change_pct": None, "fetched_at": fetched_at}
+            if idx["id"] == "BDTI" and brent_val:
+                entry["value"] = brent_val
+                entry["unit"] = "USD/bbl (Brent proxy)"
+            indices.append(entry)
+    payload = {
+        "indices": indices,
+        "fetched_at": fetched_at,
+        "upstream_unavailable": len(indices) == 0,
+    }
+    _db_upsert("shipping_rates", "shipping_rates_v2", payload)
+    logger.info(f"[worldmonitor] Shipping rates: {len(indices)} indices cached")
+
+
 # ── Chokepoint Composite Risk Scorer ─────────────────────────────────────────
 
 async def score_chokepoints():
@@ -552,11 +717,13 @@ async def score_chokepoints():
 
     This mirrors worldmonitor's 'Chokepoint Status' panel logic.
     """
-    # Load cached events
+    # Load cached events + PortWatch transit deltas
     eonet = db_read("eonet_events")
     eonet_events = eonet["data"] if eonet else []
     acled = db_read("acled_events")
     acled_events = acled["data"] if acled else []
+    portwatch = db_read("portwatch_transits")
+    pw_metrics: dict = portwatch["data"] if portwatch else {}
 
     scored = []
     for cp in CHOKEPOINTS:
@@ -573,20 +740,33 @@ async def score_chokepoints():
         eonet_near = sum(1 for e in eonet_events if nearby(e)) * 5
         acled_near = sum(1 for e in acled_events if nearby(e)) * 3
 
-        # Hard-code Red Sea surge (Houthi attacks — worldmonitor tracks this prominently)
-        yemeni_boost = 30 if cp["id"] == "bab" else 0
-        taiwan_boost = 15 if cp["id"] == "taiwan" else 0
-        hormuz_boost = 20 if cp["id"] == "hormuz" else 0
+        pw = pw_metrics.get(cp["id"], {})
+        wow_pct = float(pw.get("wow_change_pct") or 0)
+        transit_boost = min(20, int(abs(wow_pct) / 2)) if abs(wow_pct) >= 8 else 0
 
-        risk = min(100, int(base + eonet_near + acled_near + yemeni_boost + taiwan_boost + hormuz_boost))
-        trend = "escalating" if risk >= 80 else "stable" if risk < 50 else "elevated"
+        # Region-specific surges (worldmonitor tracks these prominently)
+        yemeni_boost = 30 if cp["id"] == "bab_el_mandeb" else 0
+        taiwan_boost = 15 if cp["id"] == "taiwan_strait" else 0
+        hormuz_boost = 20 if cp["id"] == "hormuz_strait" else 0
+
+        risk = min(100, int(base + eonet_near + acled_near + transit_boost + yemeni_boost + taiwan_boost + hormuz_boost))
+        trend = "up" if wow_pct <= -8 else "down" if wow_pct >= 8 else ("escalating" if risk >= 80 else "stable" if risk < 50 else "elevated")
+        war_risk_tier = (
+            "WAR_RISK_TIER_CRITICAL" if risk >= 80
+            else "WAR_RISK_TIER_HIGH" if risk >= 65
+            else "WAR_RISK_TIER_ELEVATED" if risk >= 45
+            else "WAR_RISK_TIER_NORMAL"
+        )
 
         scored.append({
-            **cp,
+            **{k: v for k, v in cp.items() if k != "portwatch_name"},
             "risk_score": risk,
             "trend": trend,
+            "wow_change_pct": wow_pct,
+            "war_risk_tier": war_risk_tier,
             "eonet_nearby": eonet_near // 5,
             "acled_nearby": acled_near // 3,
+            "latest_transit_count": pw.get("latest_transit_count"),
             "last_scored": datetime.now(timezone.utc).isoformat(),
         })
 
@@ -650,11 +830,11 @@ async def estimate_shipping_stress():
     stress_level = "critical" if stress_score >= 75 else "high" if stress_score >= 55 else "elevated" if stress_score >= 35 else "normal"
 
     carriers = [
-        {"name": "Maersk",    "risk": "HIGH" if stress_score > 70 else "MEDIUM"},
-        {"name": "MSC",       "risk": "HIGH" if stress_score > 70 else "MEDIUM"},
-        {"name": "CMA CGM",   "risk": "HIGH" if stress_score > 75 else "MEDIUM"},
-        {"name": "COSCO",     "risk": "MEDIUM"},
-        {"name": "Evergreen", "risk": "MEDIUM" if stress_score < 80 else "HIGH"},
+        {"name": "Maersk",    "risk": "high" if stress_score > 70 else "medium"},
+        {"name": "MSC",       "risk": "high" if stress_score > 70 else "medium"},
+        {"name": "CMA CGM",   "risk": "high" if stress_score > 75 else "medium"},
+        {"name": "COSCO",     "risk": "medium"},
+        {"name": "Evergreen", "risk": "medium" if stress_score < 80 else "high"},
     ]
 
     result = {
@@ -788,12 +968,14 @@ FETCH_SCHEDULE = [
     (fetch_active_fires,           30,  "NASA FIRMS fires"),
     (fetch_conflict_events,        30,  "ACLED conflict events"),
     (fetch_gdelt,                  30,  "GDELT geopolitical"),
-    (fetch_supply_chain_news,      30,  "NewsAPI supply chain"),
+    (fetch_supply_chain_news,      30,  "NewsAPI/GNews supply chain"),
     (fetch_market_quotes,          15,  "Finnhub market quotes"),
-    (fetch_energy_prices,          30,  "EIA energy prices"),
+    (fetch_energy_prices,          30,  "EIA/GIE energy prices"),
     (fetch_macro,                  30,  "FRED macro indicators"),
     (fetch_air_quality,            30,  "OpenAQ air quality"),
     (fetch_aviation,               30,  "AviationStack flights"),
+    (fetch_portwatch_transits,     30,  "IMF PortWatch chokepoint transits"),
+    (fetch_shipping_rates,         30,  "Shipping rate indices"),
     (score_chokepoints,            15,  "Chokepoint risk scoring"),
     (compute_country_instability,  30,  "Country instability index"),
     (estimate_shipping_stress,     15,  "Shipping stress estimate"),
@@ -819,6 +1001,9 @@ async def worldmonitor_cron_loop():
     Async cron loop: runs each fetcher on its own interval cadence.
     Designed to run as a background asyncio task in FastAPI lifespan.
     """
+    if os.getenv("WORLDMONITOR_FETCHER_ENABLED", "true").lower() not in ("1", "true", "yes"):
+        logger.info("[worldmonitor] Fetcher disabled (WORLDMONITOR_FETCHER_ENABLED=false)")
+        return
     logger.info("[worldmonitor] Cron loop started — fetching all data sources")
 
     # Initial warm-up: run all on startup
@@ -905,3 +1090,9 @@ def get_critical_minerals() -> list:
 
 def get_shipping_indices() -> list:
     return SHIPPING_INDICES
+
+def get_shipping_rates() -> dict:
+    r = db_read("shipping_rates_v2")
+    if r and r.get("data"):
+        return r["data"]
+    return {"indices": SHIPPING_INDICES, "fetched_at": "", "upstream_unavailable": True}
