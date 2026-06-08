@@ -546,6 +546,7 @@ export interface ArAssetDisruption {
   lat: number;
   lng: number;
   radius_km?: number;
+  exposure_usd?: number;
 }
 
 export interface ArAssetsResponse {
@@ -657,6 +658,7 @@ export interface CommandBriefing {
   nominal_nodes: number;
   total_nodes: number;
   status_breakdown?: Record<string, number>;
+  active_incidents?: Array<Record<string, unknown>>;
   critical_incidents?: Array<Record<string, unknown>>;
   watch_incidents?: Array<Record<string, unknown>>;
   recent_resolved?: Array<Record<string, unknown>>;

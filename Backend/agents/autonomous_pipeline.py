@@ -66,18 +66,22 @@ def _event_impact_radius(event: dict) -> float:
     """Dynamic radius based on event type."""
     title = str(event.get("title", "") or event.get("event_type", "")).lower()
     if any(w in title for w in ("cyclone", "typhoon", "hurricane")):
-        return 400
-    if "earthquake" in title:
-        return 250
-    if "flood" in title:
-        return 150
-    if any(w in title for w in ("wildfire", "fire")):
-        return 80
-    if any(w in title for w in ("strike", "congestion", "port")):
-        return 80
-    if any(w in title for w in ("war", "conflict", "geopolit")):
-        return 300
-    return 150
+        base = 400
+    elif "earthquake" in title:
+        base = 250
+    elif "flood" in title:
+        base = 150
+    elif any(w in title for w in ("wildfire", "fire")):
+        base = 80
+    elif any(w in title for w in ("strike", "congestion", "port")):
+        base = 80
+    elif any(w in title for w in ("war", "conflict", "geopolit")):
+        base = 300
+    else:
+        base = 150
+    if str(event.get("location_precision") or "") == "country":
+        return max(base * 12.0, 3000.0)
+    return base
 
 
 def _severity_to_label(severity: float) -> str:
@@ -709,6 +713,9 @@ async def _process_single_event(
     affected_score_threshold: float = 0.3,
 ) -> dict | None:
     """Process one live event through the full 7-step pipeline."""
+    from services.signal_geocode import geocode_signal
+
+    event = geocode_signal(dict(event))
 
     # ── Extract event fields ──
     event_id = str(event.get("id", "") or event.get("signal_id", "") or uuid4().hex[:8])
@@ -740,6 +747,20 @@ async def _process_single_event(
         return None  # No geo data, skip
     if severity_raw < minimum_signal_severity:
         return None  # Below threshold
+
+    # Skip events older than 30 days based on the event's own timestamp
+    from services.event_freshness import extract_event_timestamp, is_event_fresh
+
+    if not is_event_fresh(event, max_event_days=30):
+        return None  # Stale event, skip
+    event_ts = extract_event_timestamp(event)
+    event_ts_raw = (
+        event.get("timestamp")
+        or event.get("time")
+        or event.get("detected_at")
+        or event.get("created_at")
+        or (event_ts.isoformat() if event_ts else "")
+    )
 
     incident_id = f"inc_{uuid4().hex[:12]}"
     radius = _event_impact_radius(event)
@@ -826,7 +847,9 @@ async def _process_single_event(
                 "rfq_draft": {},
                 "backup_supplier": None,
                 "source": source,
+                "source_category": str(event.get("source_category") or ""),
                 "source_url": url,
+                "event_time": str(event_ts_raw or ""),
                 "created_at": pipeline_end.isoformat(),
                 "pipeline_ms": 0,
                 "simulation_outcome": "no_impact",
@@ -1132,7 +1155,9 @@ async def _process_single_event(
                 "lead_time_days": 2
             },
             "source": source or "Intelligence Core",
+            "source_category": str(event.get("source_category") or ""),
             "source_url": url or "https://praecantator.ai/signals",
+            "event_time": str(event_ts_raw or ""),
             "created_at": pipeline_end.isoformat(),
             "analyzed_at": pipeline_end.isoformat(),
             "pipeline_ms": round(elapsed_ms, 0),

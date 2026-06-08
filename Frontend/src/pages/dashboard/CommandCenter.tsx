@@ -6,9 +6,11 @@ import {
 } from "@/components/ui/map";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
+import { filterFreshIncidents } from "@/lib/incident-freshness";
+import { incidentCategoryLabel, incidentCategoryColor } from "@/lib/incident-category";
 import {
-  RefreshCw, Target, Activity, Shield, Network,
-  TrendingUp, TrendingDown, AlertTriangle, Eye,
+  RefreshCw, Target, Shield, Network,
+  TrendingUp, AlertTriangle, Eye,
 } from "lucide-react";
 
 /* ── tiny sparkline (pure SVG) ── */
@@ -88,6 +90,20 @@ function HBar({ label, pct, color }: { label: string; pct: number; color: string
   );
 }
 
+function incidentCoords(inc: Record<string, unknown>) {
+  const lat = inc.lat ?? inc.latitude ?? inc.event_lat;
+  const lng = inc.lng ?? inc.longitude ?? inc.event_lng;
+  if (typeof lat !== "number" || typeof lng !== "number" || isNaN(lat) || isNaN(lng)) return null;
+  return { lat, lng };
+}
+
+function markerColor(severity: string) {
+  const sev = String(severity || "").toUpperCase();
+  if (sev === "CRITICAL" || sev === "HIGH") return { dot: "bg-red-500", ping: "bg-red-500/20", badge: "bg-red-100 text-red-700" };
+  if (sev === "MODERATE" || sev === "WARNING") return { dot: "bg-amber-400", ping: "bg-amber-400/20", badge: "bg-amber-100 text-amber-700" };
+  return { dot: "bg-emerald-500", ping: "bg-emerald-500/20", badge: "bg-emerald-100 text-emerald-700" };
+}
+
 /* ═══════════════════════════════════════════════════════════════════ */
 
 const CommandCenter = () => {
@@ -107,11 +123,15 @@ const CommandCenter = () => {
   });
 
   const b = (briefing || {}) as Record<string, any>;
-  const criticalCount = b.critical_count || 0;
-  const watchCount = b.watch_count || 0;
   const health = b.network_health || {};
   const totalNodes = b.total_nodes || 0;
-  const incidents = [...(b.critical_incidents || []), ...(b.watch_incidents || [])];
+
+  const activePool = (b.active_incidents?.length
+    ? b.active_incidents
+    : [...(b.critical_incidents || []), ...(b.watch_incidents || [])]) as Record<string, unknown>[];
+  const incidents = filterFreshIncidents(activePool);
+  const criticalCount = incidents.filter((inc) => ["CRITICAL", "HIGH"].includes(String(inc.severity || ""))).length;
+  const watchCount = incidents.filter((inc) => ["MODERATE", "LOW"].includes(String(inc.severity || ""))).length;
 
   const selectedIncident = selectedId
     ? incidents.find((i: any) => String(i.id) === selectedId)
@@ -125,23 +145,11 @@ const CommandCenter = () => {
   const sparkHealth = useMemo(() => Array.from({ length: 7 }, () => Math.max(30, safePct + Math.floor(Math.random() * 10 - 5))), [safePct]);
   const sparkNodes = useMemo(() => Array.from({ length: 7 }, () => Math.max(800, totalNodes + Math.floor(Math.random() * 50 - 25))), [totalNodes]);
 
-  /* risk categories from incidents */
+  /* risk categories from incidents — mirror Intelligence signal categories */
   const riskCategories = useMemo(() => {
     const cats: Record<string, number> = {};
     incidents.forEach((inc: any) => {
-      let t = inc.event_type || inc.category || "Operational";
-      if (String(t).toLowerCase() === "risk") {
-        const title = (inc.event_title || "").toLowerCase();
-        if (title.includes("cyclone") || title.includes("hurricane") || title.includes("typhoon")) t = "Tropical Storm";
-        else if (title.includes("flood")) t = "Flooding";
-        else if (title.includes("fire")) t = "Wildfire";
-        else if (title.includes("strike") || title.includes("protest")) t = "Labor & Unrest";
-        else if (title.includes("earthquake")) t = "Earthquake";
-        else t = "Supply Disruption";
-      } else {
-        t = String(t).replace(/[-_]/g, ' ')
-                     .replace(/\b\w/g, (l) => l.toUpperCase());
-      }
+      const t = incidentCategoryLabel(inc);
       cats[t] = (cats[t] || 0) + 1;
     });
     const sorted = Object.entries(cats).sort((a, b) => b[1] - a[1]).slice(0, 4);
@@ -155,7 +163,6 @@ const CommandCenter = () => {
 
       {/* ═══ KPI CARDS ═══ */}
       <div className="grid grid-cols-4 gap-4">
-        {/* Critical Risks */}
         <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Critical Risks</p>
@@ -167,7 +174,6 @@ const CommandCenter = () => {
           <Sparkline data={sparkCritical} color="hsl(0 72% 51%)" />
         </div>
 
-        {/* Active Incidents */}
         <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Active Incidents</p>
@@ -179,7 +185,6 @@ const CommandCenter = () => {
           <Sparkline data={sparkActive} color="#f59e0b" />
         </div>
 
-        {/* Network Health */}
         <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Network Health</p>
@@ -194,7 +199,6 @@ const CommandCenter = () => {
           <Sparkline data={sparkHealth} color="#10b981" />
         </div>
 
-        {/* Suppliers Monitored */}
         <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Suppliers Monitored</p>
@@ -217,7 +221,6 @@ const CommandCenter = () => {
 
       {/* ═══ MAP + DECISION PANEL ═══ */}
       <div className="flex gap-4 h-[420px]">
-        {/* Global Risk Map */}
         <div className="flex-1 bg-card border border-border rounded-lg overflow-hidden relative shadow-sm">
           <div className="absolute top-3 left-3 z-10 bg-card/90 backdrop-blur-sm border border-border rounded-md px-3 py-1.5">
             <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">Global Risk Map</p>
@@ -226,40 +229,38 @@ const CommandCenter = () => {
           <Map theme="light" center={[30, 20]} zoom={1.8} className="w-full h-full">
             <MapControls position="top-left" showZoom showLocate />
             {incidents
-              .filter((inc: any) => {
-                // Only render markers that have REAL coordinates from the API
-                const lat = inc.lat ?? inc.latitude ?? inc.event_lat;
-                const lng = inc.lng ?? inc.longitude ?? inc.event_lng;
-                return typeof lat === "number" && typeof lng === "number" && !isNaN(lat) && !isNaN(lng);
-              })
               .map((inc: any, i: number) => {
-                const lat = inc.lat ?? inc.latitude ?? inc.event_lat;
-                const lng = inc.lng ?? inc.longitude ?? inc.event_lng;
-                const isCritical = inc.severity === "CRITICAL";
+                const coords = incidentCoords(inc);
+                if (!coords) return null;
+                const colors = markerColor(String(inc.severity || ""));
+                const isCritical = ["CRITICAL", "HIGH"].includes(String(inc.severity || "").toUpperCase());
                 const isSelected = String(inc.id) === String(selectedIncident?.id);
 
                 return (
-                  <MapMarker key={inc.id || i} longitude={lng} latitude={lat}>
+                  <MapMarker key={inc.id || i} longitude={coords.lng} latitude={coords.lat}>
                     <MarkerContent>
                       <div
                         onClick={() => setSelectedId(String(inc.id))}
                         className="relative cursor-pointer group"
                       >
                         {isCritical && (
-                          <div className="absolute inset-0 -m-2 rounded-full bg-red-500/20 animate-ping" />
+                          <div className={`absolute inset-0 -m-2 rounded-full ${colors.ping} animate-ping`} />
                         )}
                         <div className={`
                           size-3 rounded-full border-2 border-white shadow-lg transition-all
-                          ${isCritical ? "bg-red-500" : "bg-amber-400"}
+                          ${colors.dot}
                           ${isSelected ? "ring-2 ring-blue-500 ring-offset-1 scale-125" : "group-hover:scale-110"}
                         `} />
                       </div>
                     </MarkerContent>
                     <MarkerPopup className="w-56 p-0 rounded-lg shadow-xl border border-border bg-card">
                       <div className="p-3 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${isCritical ? "bg-red-100 text-red-700" : "bg-amber-100 text-amber-700"}`}>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase ${colors.badge}`}>
                             {inc.severity || "WARNING"}
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${incidentCategoryColor(inc)}`}>
+                            {incidentCategoryLabel(inc)}
                           </span>
                         </div>
                         <p className="font-semibold text-sm leading-tight truncate">{inc.event_title}</p>
@@ -272,14 +273,12 @@ const CommandCenter = () => {
               })}
           </Map>
 
-          {/* Legend */}
           <div className="absolute bottom-3 left-3 z-10 bg-card/90 backdrop-blur-sm border border-border rounded-md px-3 py-2 space-y-1.5">
             <div className="flex items-center gap-2 text-xs"><div className="w-2.5 h-2.5 rounded-full bg-red-500" /> Critical</div>
             <div className="flex items-center gap-2 text-xs"><div className="w-2.5 h-2.5 rounded-full bg-amber-400" /> Warning</div>
-            <div className="flex items-center gap-2 text-xs"><div className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Safe</div>
+            <div className="flex items-center gap-2 text-xs"><div className="w-2.5 h-2.5 rounded-full bg-emerald-500" /> Low Risk</div>
           </div>
 
-          {/* View Supplier Network link */}
           <button
             onClick={() => navigate("/dashboard/network")}
             className="absolute bottom-3 right-3 z-10 flex items-center gap-1.5 bg-card/90 backdrop-blur-sm border border-border rounded-md px-3 py-2 text-xs font-medium hover:bg-accent transition-colors"
@@ -288,7 +287,6 @@ const CommandCenter = () => {
           </button>
         </div>
 
-        {/* Decision Panel */}
         <div className="w-[300px] bg-card border border-border rounded-lg shadow-sm flex flex-col">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2">
             <Target size={14} className="text-sentinel-red" />
@@ -307,8 +305,8 @@ const CommandCenter = () => {
               </div>
               <div>
                 <p className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Risk Assessed</p>
-                <p className={`text-sm font-bold ${selectedIncident.severity === "CRITICAL" ? "text-red-500" : "text-amber-500"}`}>
-                  {selectedIncident.severity === "CRITICAL" ? "High Risk" : "Medium Risk"}
+                <p className={`text-sm font-bold ${["CRITICAL", "HIGH"].includes(String(selectedIncident.severity || "").toUpperCase()) ? "text-red-500" : "text-amber-500"}`}>
+                  {["CRITICAL", "HIGH"].includes(String(selectedIncident.severity || "").toUpperCase()) ? "High Risk" : "Medium Risk"}
                 </p>
               </div>
               <div>
@@ -353,18 +351,17 @@ const CommandCenter = () => {
 
       {/* ═══ BOTTOM: TABLE + ANALYTICS ═══ */}
       <div className="flex gap-4 flex-1 min-h-[280px]">
-        {/* Structured Incident Table */}
         <div className="flex-1 bg-card border border-border rounded-lg shadow-sm flex flex-col overflow-hidden">
           <div className="px-4 py-3 border-b border-border flex items-center gap-2 shrink-0">
             <AlertTriangle size={14} className="text-muted-foreground" />
             <h2 className="text-xs font-mono font-bold uppercase tracking-widest">Structured Incident Table</h2>
           </div>
-          {/* 5 rows visible (~280px), rest scrollable */}
           <div className="overflow-y-auto custom-scrollbar" style={{ maxHeight: "280px" }}>
             <table className="w-full text-sm">
               <thead className="sticky top-0 z-10">
                 <tr className="bg-muted/50 border-b border-border text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground">
                   <th className="px-4 py-2.5 text-left w-24">Severity</th>
+                  <th className="px-4 py-2.5 text-left w-28">Category</th>
                   <th className="px-4 py-2.5 text-left">Incident Description</th>
                   <th className="px-4 py-2.5 text-left w-20">Nodes</th>
                   <th className="px-4 py-2.5 text-left w-28">Exposure</th>
@@ -377,15 +374,16 @@ const CommandCenter = () => {
               <tbody className="divide-y divide-border">
                 {incidents.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="px-4 py-10 text-center text-muted-foreground">
+                    <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
                       {isLoading ? "Loading telemetry..." : "No incidents detected."}
                     </td>
                   </tr>
                 ) : incidents.map((inc: any, i: number) => {
-                  const isCritical = inc.severity === "CRITICAL";
+                  const isCritical = ["CRITICAL", "HIGH"].includes(String(inc.severity || "").toUpperCase());
                   const isSelected = String(inc.id) === String(selectedIncident?.id);
                   const conf = inc.gnn_confidence || 0;
                   const confPct = Math.round(conf * 100);
+                  const colors = markerColor(String(inc.severity || ""));
 
                   return (
                     <tr
@@ -395,11 +393,16 @@ const CommandCenter = () => {
                     >
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${isCritical ? "bg-red-500" : inc.severity === "WARNING" ? "bg-amber-400" : "bg-emerald-500"}`} />
+                          <div className={`w-2 h-2 rounded-full ${colors.dot}`} />
                           <span className={`text-[10px] font-bold uppercase ${isCritical ? "text-red-600" : "text-amber-600"}`}>
                             {inc.severity || "Warning"}
                           </span>
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-bold uppercase border ${incidentCategoryColor(inc)}`}>
+                          {incidentCategoryLabel(inc)}
+                        </span>
                       </td>
                       <td className="px-4 py-3 font-medium truncate max-w-[300px]">{inc.event_title || "Unknown"}</td>
                       <td className="px-4 py-3 tabular-nums">{inc.affected_node_count || 1}</td>
@@ -439,9 +442,7 @@ const CommandCenter = () => {
           </div>
         </div>
 
-        {/* Analytics sidebar */}
         <div className="w-[280px] flex flex-col gap-4">
-          {/* Risk Distribution */}
           <div className="bg-card border border-border rounded-lg shadow-sm p-4">
             <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-3">Risk Distribution</h3>
             <DonutChart slices={[
@@ -451,7 +452,6 @@ const CommandCenter = () => {
             ]} />
           </div>
 
-          {/* Top Risk Categories */}
           <div className="bg-card border border-border rounded-lg shadow-sm p-4 flex-1">
             <h3 className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-3">Top Risk Categories</h3>
             <div className="space-y-3">

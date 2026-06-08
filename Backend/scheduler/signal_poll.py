@@ -24,7 +24,7 @@ from agents.extended_signal_agent import (
     fetch_social_sentiment,
     fetch_wto_trade_signals,
 )
-from services.firestore_store import add_audit, purge_archived_signals, replace_active_signals
+from services.firestore_store import add_audit, purge_archived_signals, purge_stale_incidents, replace_active_signals
 from services.local_store import DB_PATH
 from services.secret_manager import get_secret
 
@@ -96,7 +96,7 @@ def _derive_country_instability_signals(items: list[dict]) -> list[dict]:
 # resolved/dismissed incidents are kept longer (RESOLVED_TTL_DAYS) for
 # audit trail then removed.
 
-ACTIVE_TTL_HOURS = int(os.getenv("INCIDENT_ACTIVE_TTL_HOURS", "24"))
+ACTIVE_TTL_HOURS = int(os.getenv("INCIDENT_ACTIVE_TTL_HOURS", "168"))  # 7 days — live events can run longer than 24h
 RESOLVED_TTL_DAYS = int(os.getenv("INCIDENT_RESOLVED_TTL_DAYS", "7"))
 
 
@@ -237,13 +237,20 @@ async def _poll_sources() -> None:
     for item in _derive_country_instability_signals(list(dedup.values())):
         dedup[str(item["id"])] = item
 
+    from services.signal_geocode import geocode_signal
+
     enriched = mark_corroborations([enrich_signal_item(dict(x)) for x in dedup.values()])
+    enriched = [geocode_signal(dict(x)) for x in enriched]
     replace_active_signals(enriched)
     purged = purge_archived_signals(days=7)
     add_audit("signal_poll_complete", f"active={len(dedup)} purged={purged}")
 
     # ── Purge stale incidents before generating new ones ──────────────
     stale_purged = _purge_stale_incidents()
+    try:
+        purge_stale_incidents(max_age_days=7)
+    except Exception as exc:
+        add_audit("incident_purge_error", str(exc)[:200])
 
     # ── v4 Autonomous Incident Generation ────────────────────────────
     # After signals land, push the top events through the GNN-based
@@ -252,22 +259,36 @@ async def _poll_sources() -> None:
         from services.incident_engine import incident_engine
         from services.firestore_store import upsert_incident, list_incidents
 
+        from services.event_freshness import extract_event_timestamp, is_event_fresh
+
         # Build risk-event dicts from the enriched signals
         events: list[dict] = []
         for sig in enriched:
             sev = float(sig.get("severity", 0) or 0)
-            if sev < 4:  # Only process medium+ severity
+            if sev < 2.5:  # Include news, sentiment, humanitarian — not just disasters
                 continue
+            if not is_event_fresh(sig, max_event_days=30):
+                continue
+            lat = float(sig.get("lat", 0) or 0)
+            lng = float(sig.get("lng", 0) or 0)
+            if lat == 0.0 and lng == 0.0:
+                continue
+            event_ts = extract_event_timestamp(sig)
             events.append({
                 "id": str(sig.get("id") or ""),
                 "title": str(sig.get("title") or sig.get("event_type") or "Signal"),
-                "severity": "CRITICAL" if sev >= 8 else ("HIGH" if sev >= 6 else "MEDIUM"),
+                "event_type": str(sig.get("event_type") or "signal"),
+                "severity": "CRITICAL" if sev >= 8 else ("HIGH" if sev >= 6 else ("MEDIUM" if sev >= 4 else "LOW")),
                 "description": str(sig.get("description") or sig.get("location") or ""),
-                "lat": float(sig.get("lat", 0) or 0),
-                "lng": float(sig.get("lng", 0) or 0),
+                "lat": lat,
+                "lng": lng,
+                "location_precision": str(sig.get("location_precision") or "exact"),
                 "region": str(sig.get("location") or "Unknown"),
                 "mode": str(sig.get("mode") or "land"),
-                "timestamp": str(sig.get("created_at") or ""),
+                "source": str(sig.get("source") or ""),
+                "source_category": str(sig.get("source_category") or ""),
+                "url": str(sig.get("url") or ""),
+                "timestamp": event_ts.isoformat() if event_ts else str(sig.get("created_at") or ""),
             })
 
         # Query all contexts from SQLite for multi-tenant incident generation
@@ -346,8 +367,11 @@ async def _poll_sources() -> None:
 
             existing_ids = {str(inc.get("event_id") or inc.get("id") or "") for inc in list_incidents(limit=500, tenant_id=tenant_id)}
 
+            severity_rank = {"CRITICAL": 3, "HIGH": 2, "MEDIUM": 1, "MODERATE": 1}
+            events.sort(key=lambda e: severity_rank.get(str(e.get("severity") or ""), 0), reverse=True)
+
             created = 0
-            for evt in events[:15]:
+            for evt in events[:25]:
                 if evt["id"] in existing_ids:
                     continue
                 inc = incident_engine.process_event(evt, suppliers_for_gnn)

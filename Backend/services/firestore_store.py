@@ -13,6 +13,8 @@ from google.cloud.firestore_v1.base_query import FieldFilter
 from pathlib import Path
 import logging
 
+from services.event_freshness import is_incident_fresh
+
 DB_PATH = Path(__file__).resolve().parent.parent / "local_fallback.db"
 
 
@@ -879,6 +881,48 @@ def count_incidents_by_status(tenant_id: str | None = None) -> dict[str, int]:
         if key:
             counts[key] = counts.get(key, 0) + 1
     return counts
+
+
+def purge_stale_incidents(tenant_id: str | None = None, max_age_days: int = 7) -> dict[str, Any]:
+    """Auto-resolve incidents that have been in active status for longer than max_age_days.
+
+    Active statuses: DETECTED, ANALYZED, AWAITING_APPROVAL.
+    These are moved to AUTO_RESOLVED with a note about staleness.
+    Also resolves active incidents whose underlying event is no longer fresh.
+    """
+    now = datetime.now(timezone.utc)
+    cutoff = (now - timedelta(days=max_age_days)).isoformat()
+    active_statuses = {"DETECTED", "ANALYZED", "AWAITING_APPROVAL"}
+    all_active = list_incidents(limit=500, tenant_id=tenant_id, visibility="all")
+    stale: list[dict[str, Any]] = []
+    for inc in all_active:
+        status = str(inc.get("status") or "").strip().upper()
+        if status not in active_statuses:
+            continue
+        if not is_incident_fresh(inc, max_incident_days=max_age_days, max_event_days=30):
+            stale.append(inc)
+            continue
+        created_at = str(inc.get("created_at") or "")
+        if not created_at:
+            continue
+        if created_at < cutoff:
+            stale.append(inc)
+    resolved_ids: list[str] = []
+    for inc in stale:
+        inc_id = str(inc.get("id") or "")
+        if not inc_id:
+            continue
+        update_incident_status(
+            inc_id,
+            "AUTO_RESOLVED",
+            {
+                "auto_resolved_at": now.isoformat(),
+                "auto_resolved_reason": f"Stale incident (>{max_age_days} days in active status)",
+            },
+            tenant_id=tenant_id,
+        )
+        resolved_ids.append(inc_id)
+    return {"purged_count": len(resolved_ids), "purged_ids": resolved_ids}
 
 
 def append_master_data_change(user_id: str, change_type: str, payload: dict[str, Any]) -> dict[str, Any]:

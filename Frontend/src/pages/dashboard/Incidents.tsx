@@ -14,6 +14,8 @@ import { motion, AnimatePresence } from "motion/react";
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
 import { getAccessToken, getUserId } from "@/lib/api";
+import { filterFreshIncidents } from "@/lib/incident-freshness";
+import { incidentCategoryLabel, incidentCategoryColor } from "@/lib/incident-category";
 
 function authHeaders(): HeadersInit {
   const token = getAccessToken();
@@ -64,6 +66,8 @@ interface Incident {
   gnn_confidence: number;
   created_at: string;
   source_url?: string;
+  source?: string;
+  source_category?: string;
   pipeline_ms?: number;
   route_options: {
     mode: string;
@@ -148,10 +152,15 @@ const Incidents = () => {
     refetchInterval: 15_000,
   });
   const incidentsAll: Record<string, unknown>[] = Array.isArray(incidentsRaw) ? incidentsRaw as Record<string, unknown>[] : [];
+  const freshIncidents = filterFreshIncidents(incidentsAll).filter((inc, idx, arr) => {
+    const key = String(inc.event_title || inc.title || inc.id || "").trim().toLowerCase();
+    return arr.findIndex((other) => String(other.event_title || other.title || other.id || "").trim().toLowerCase() === key) === idx;
+  });
+
   // When "ACTIVE" filter is selected, only show non-resolved/non-dismissed incidents
   const incidents = statusFilter === "ACTIVE"
-    ? incidentsAll.filter((inc) => activeStatuses.includes(String(inc.status || "")))
-    : incidentsAll;
+    ? freshIncidents.filter((inc) => activeStatuses.includes(String(inc.status || "")))
+    : freshIncidents;
 
   const { data: detail, refetch: refetchDetail } = useQuery<Incident>({
     queryKey: ["incident", selectedId],
@@ -255,6 +264,11 @@ const Incidents = () => {
                     {new Date(String(incident.created_at)).toLocaleDateString()}
                   </span>
                 </div>
+                <div className="flex items-center gap-2 pl-[26px] mb-1.5">
+                  <span className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded border ${incidentCategoryColor(incident)}`}>
+                    {incidentCategoryLabel(incident)}
+                  </span>
+                </div>
                 <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-400 pl-[26px]">
                   <span className="text-red-500">{Number(incident.affected_node_count || 0)} nodes</span>
                   <span>${Number(incident.total_exposure_usd || 0).toLocaleString()}</span>
@@ -284,6 +298,9 @@ const Incidents = () => {
                   } ${(SEVERITY[String(detail.severity)] || SEVERITY.LOW).text}`}
                 >
                   {String(detail.severity)}
+                </span>
+                <span className={`text-xs font-mono font-bold uppercase px-2.5 py-1 rounded border shadow-sm ${incidentCategoryColor(detail as unknown as Record<string, unknown>)}`}>
+                  {incidentCategoryLabel(detail as unknown as Record<string, unknown>)}
                 </span>
                 <span
                   className={`text-xs font-mono font-bold uppercase px-2.5 py-1 rounded shadow-sm ${

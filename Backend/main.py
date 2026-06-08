@@ -792,19 +792,17 @@ def _api_risk_events() -> list[dict]:
             severity_label = "HIGH"
         elif severity_value >= 4:
             severity_label = "MEDIUM"
-        ts = str(sig.get("created_at") or datetime.now(timezone.utc).isoformat())
+        from services.event_freshness import extract_event_timestamp, is_event_fresh
+        from services.signal_geocode import geocode_signal
+
+        sig = geocode_signal(sig)
         title_str = str(sig.get("title") or sig.get("event_type") or "Disruption signal")
         desc_str = str(sig.get("description") or sig.get("location") or "Signal-derived event")
-        
-        # Enforce reasonable recency (e.g., last 90 days instead of strict 24h)
-        try:
-            clean_ts = ts.replace("Z", "+00:00")
-            parsed_time = datetime.fromisoformat(clean_ts).replace(tzinfo=timezone.utc)
-            age_days = (datetime.now(timezone.utc) - parsed_time).days
-            if age_days > 90: # Keep up to 3 months of history for trend analysis
-                continue
-        except:
-            pass
+
+        if not is_event_fresh(sig, max_event_days=30):
+            continue
+        event_ts = extract_event_timestamp(sig)
+        ts = event_ts.isoformat() if event_ts else str(sig.get("created_at") or datetime.now(timezone.utc).isoformat())
 
         # Infer mode from content if not present
         inferred_mode = str(sig.get("mode") or "").lower()
@@ -823,12 +821,17 @@ def _api_risk_events() -> list[dict]:
             {
                 "id": str(sig.get("id") or sig.get("signal_id") or f"evt_{idx+1}"),
                 "title": title_str,
+                "event_type": str(sig.get("event_type") or "signal"),
                 "severity": severity_label,
+                "severity_raw": severity_value,
                 "description": desc_str,
                 "timestamp": ts,
                 "analyst": str(sig.get("source") or "signal-pipeline"),
+                "source": str(sig.get("source") or "signal-pipeline"),
+                "source_category": str(sig.get("source_category") or ""),
                 "lat": float(sig.get("lat", 0) or 0),
                 "lng": float(sig.get("lng", 0) or 0),
+                "location_precision": str(sig.get("location_precision") or "exact"),
                 "region": str(sig.get("region") or sig.get("location") or "Unknown"),
                 "url": _normalized_url(str(sig.get("url") or "")),
                 "mode": inferred_mode,
@@ -2078,7 +2081,10 @@ async def api_signals_categorized() -> dict:
         "regulatory": [], "sentiment": [], "humanitarian": [], "social_news": [],
         "maritime": [], "trade": [],
     }
+    from services.signal_geocode import geocode_signal
+
     for sig in rows:
+        sig = geocode_signal(sig)
         cat = str(sig.get("source_category") or "")
         if not cat:
             # infer from source
@@ -2649,17 +2655,32 @@ async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[st
 
     active_incidents = [
         inc for inc in list_incidents(status=None, limit=100, tenant_id=tenant_id)
-        if str(inc.get("status") or "").upper() not in {"RESOLVED", "AUTO_RESOLVED", "DISMISSED"}
+        if str(inc.get("status") or "").upper() in {"DETECTED", "ANALYZED", "AWAITING_APPROVAL"}
     ]
     disruptions = []
     for inc in active_incidents:
         event_payload = inc.get("event") if isinstance(inc.get("event"), dict) else {}
-        lat = inc.get("lat") or inc.get("event_lat") or event_payload.get("lat")
-        lng = inc.get("lng") or inc.get("event_lng") or event_payload.get("lng")
+        lat = (
+            inc.get("lat") or inc.get("event_lat") or inc.get("latitude")
+            or event_payload.get("lat") or event_payload.get("latitude")
+        )
+        lng = (
+            inc.get("lng") or inc.get("event_lng") or inc.get("longitude")
+            or event_payload.get("lng") or event_payload.get("longitude")
+        )
         lat_f, lng_f = _ar_float(lat), _ar_float(lng)
         if lat_f == 0 and lng_f == 0:
             affected = inc.get("affected_suppliers") if isinstance(inc.get("affected_suppliers"), list) else []
             match = next((by_id.get(str(s.get("id") or s.get("supplier_id") or "")) for s in affected if isinstance(s, dict)), None)
+            if not match:
+                affected_nodes = inc.get("affected_nodes") if isinstance(inc.get("affected_nodes"), list) else []
+                for node in affected_nodes:
+                    if not isinstance(node, dict):
+                        continue
+                    node_id = str(node.get("node_id") or node.get("id") or "")
+                    match = by_id.get(node_id)
+                    if match:
+                        break
             if match:
                 lat_f, lng_f = match["lat"], match["lng"]
         if lat_f == 0 and lng_f == 0:
@@ -2671,6 +2692,7 @@ async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[st
             "lat": lat_f,
             "lng": lng_f,
             "radius_km": _event_impact_radius_km(inc),
+            "exposure_usd": _ar_float(inc.get("total_exposure_usd"), 0),
         })
 
     return {
@@ -2799,6 +2821,7 @@ from services.firestore_store import (
     list_incidents,
     update_incident_status,
     count_incidents_by_status,
+    purge_stale_incidents,
 )
 
 
@@ -2811,6 +2834,8 @@ class IncidentApproveRequest(BaseModel):
 async def api_list_incidents(status: str | None = None, user=Depends(verify_firebase_or_local_token)) -> list[dict]:
     """List all incidents, optionally filtered by status."""
     tenant_id = _resolved_request_tenant(user)
+    # Auto-resolve stale incidents (>7 days in active status)
+    purge_stale_incidents(tenant_id=tenant_id, max_age_days=7)
     resource_tenant = tenant_id
     _require_incident_permission(user, Permission.INCIDENT_READ, resource_tenant)
     return list_incidents(status=status, limit=100, tenant_id=tenant_id)
@@ -2974,8 +2999,8 @@ async def api_generate_incidents(
     Trigger the autonomous pipeline against LIVE signals and the
     customer's actual supplier network.
 
-    In production this runs every 15 minutes via the scheduler.
-    This endpoint provides manual trigger for testing/demo.
+    Signal polling (every ~10 min via APScheduler) also auto-creates incidents.
+    This endpoint runs the fuller autonomous pipeline on demand.
     """
     user_id = str(user.get("sub") or "").strip()
     if not user_id:
@@ -2994,6 +3019,9 @@ async def api_generate_incidents(
             context = json.loads(row.get("payload_json") or "{}") if isinstance(row, dict) else {}
         except Exception:
             context = {}
+
+    # Auto-resolve stale incidents (>7 days in active status)
+    purge_stale_incidents(tenant_id=resource_tenant, max_age_days=7)
 
     # Get live events and supplier dataset
     events = _api_risk_events()
@@ -3229,30 +3257,49 @@ async def api_command_briefing(response: Response, user=Depends(verify_firebase_
     cache_key = f"api:command:briefing:{tenant_id}"
 
     def _compute() -> dict[str, Any]:
-        all_incidents = list_incidents(limit=100, tenant_id=tenant_id)
-        summary_incidents = list_incidents(limit=500, tenant_id=tenant_id)
+        from services.event_freshness import is_incident_fresh
+
+        # Auto-resolve stale incidents (>7 days in active status)
+        purge_stale_incidents(tenant_id=tenant_id, max_age_days=7)
+        all_incidents = [i for i in list_incidents(limit=100, tenant_id=tenant_id) if is_incident_fresh(i)]
+        summary_incidents = [i for i in list_incidents(limit=500, tenant_id=tenant_id) if is_incident_fresh(i)]
         counts = count_incidents_by_status(tenant_id)
         critical_count = len([
             i for i in summary_incidents
             if i.get("severity") in ("CRITICAL", "HIGH")
             and i.get("status") in ("DETECTED", "ANALYZED", "AWAITING_APPROVAL")
         ])
+        active_statuses = ("DETECTED", "ANALYZED", "AWAITING_APPROVAL")
         watch_count = len([
             i for i in summary_incidents
-            if i.get("severity") in ("MODERATE",)
-            and i.get("status") in ("DETECTED", "ANALYZED")
+            if i.get("severity") in ("MODERATE", "LOW")
+            and i.get("status") in active_statuses
         ])
         resolved_count = counts.get("RESOLVED", 0) + counts.get("AUTO_RESOLVED", 0) + counts.get("DISMISSED", 0)
-        critical_incidents = [
+
+        def _dedupe_incidents(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            seen: set[str] = set()
+            deduped: list[dict[str, Any]] = []
+            for inc in items:
+                key = str(inc.get("event_title") or inc.get("title") or inc.get("id") or "").strip().lower()
+                if not key or key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(inc)
+            return deduped
+
+        def _has_node_impact(inc: dict[str, Any]) -> bool:
+            try:
+                return int(inc.get("affected_node_count") or 0) > 0
+            except (TypeError, ValueError):
+                return False
+
+        active_incidents = _dedupe_incidents([
             i for i in all_incidents
-            if i.get("severity") in ("CRITICAL", "HIGH")
-            and i.get("status") in ("DETECTED", "ANALYZED", "AWAITING_APPROVAL")
-        ]
-        watch_incidents = [
-            i for i in all_incidents
-            if i.get("severity") in ("MODERATE",)
-            and i.get("status") in ("DETECTED", "ANALYZED")
-        ]
+            if i.get("status") in active_statuses and _has_node_impact(i)
+        ])
+        critical_incidents = [i for i in active_incidents if i.get("severity") in ("CRITICAL", "HIGH")]
+        watch_incidents = [i for i in active_incidents if i.get("severity") in ("MODERATE", "LOW")]
         recent_resolved = [
             i for i in all_incidents
             if i.get("status") in ("RESOLVED", "APPROVED", "DISMISSED")
@@ -3269,6 +3316,7 @@ async def api_command_briefing(response: Response, user=Depends(verify_firebase_
             "nominal_nodes": max(0, len(suppliers) - critical_count - watch_count),
             "total_nodes": len(suppliers),
             "status_breakdown": counts,
+            "active_incidents": active_incidents,
             "critical_incidents": critical_incidents,
             "watch_incidents": watch_incidents,
             "recent_resolved": recent_resolved,

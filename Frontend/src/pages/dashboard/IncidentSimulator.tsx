@@ -18,6 +18,7 @@ import {
 import { AnimatePresence, motion } from "motion/react";
 
 import { api } from "@/lib/api";
+import { filterFreshIncidents } from "@/lib/incident-freshness";
 import { ReasoningPanel } from "@/components/workflow/ReasoningPanel";
 
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
@@ -130,11 +131,13 @@ const IncidentSimulator = () => {
   const [statusFilter, setStatusFilter] = useState("");
   const [rfqExpanded, setRfqExpanded] = useState(false);
 
-  const { data: simulations = [] } = useQuery({
+  const { data: simulationsRaw = [] } = useQuery({
     queryKey: ["intelligence", "simulation-incidents", statusFilter],
     queryFn: () => api.intelligence.simulationIncidents(statusFilter || undefined),
     refetchInterval: 15_000,
   });
+
+  const simulations = filterFreshIncidents(simulationsRaw as Record<string, unknown>[]);
 
   const { data: detail } = useQuery<SimulationIncident>({
     queryKey: ["simulation-incident", selectedId],

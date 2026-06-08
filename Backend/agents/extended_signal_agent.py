@@ -173,10 +173,14 @@ async def fetch_gdacs() -> list[dict]:
         severity = {"red": 8.5, "orange": 6.0, "green": 3.0}.get(alert, 4.0)
         url_field = props.get("url") or {}
         url = url_field.get("report", "") if isinstance(url_field, dict) else str(url_field)
+        title = str(props.get("htmldescription") or props.get("eventname") or "GDACS Event")
+        from services.event_freshness import extract_event_timestamp
+
+        event_ts = extract_event_timestamp({"title": title, "timestamp": props.get("fromdate") or props.get("startdate")})
         results.append({
             "id": f"gdacs_{props.get('eventid') or i}",
             "event_type": str(props.get("eventtype") or "disaster").lower(),
-            "title": str(props.get("htmldescription") or props.get("eventname") or "GDACS Event"),
+            "title": title,
             "location": str(props.get("country") or "Global"),
             "severity": _clamp(severity),
             "lat": float(coords[1]) if len(coords) > 1 else 0.0,
@@ -184,6 +188,7 @@ async def fetch_gdacs() -> list[dict]:
             "source": "gdacs",
             "source_category": "disaster",
             "url": str(url),
+            "timestamp": event_ts.isoformat() if event_ts else _now(),
             "created_at": _now(),
         })
     return results

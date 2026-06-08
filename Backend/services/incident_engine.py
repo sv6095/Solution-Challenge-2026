@@ -24,6 +24,7 @@ from ml.gnn_stub import (
 )
 from agents.reasoning_logger import log_reasoning_step
 from services.erp_sync import fetch_live_node_state
+from services.signal_geocode import COUNTRY_CENTROIDS, geocode_signal, lookup_country, match_country_in_text
 
 
 IncidentStatus = Literal[
@@ -79,6 +80,8 @@ class Incident:
     approved_by: str = ""
     dismiss_reason: str = ""
     source_url: str = ""
+    source: str = ""
+    source_category: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -120,24 +123,6 @@ class IncidentEngine:
         this acts as a CTE/GraphDB proxy, filtering down to only the impacted
         subgraph (nodes within radius + immediate N-tier dependents).
         """
-        COUNTRY_CENTROIDS = {
-            "india": (20.5937, 78.9629),
-            "in": (20.5937, 78.9629),
-            "germany": (51.1657, 10.4515),
-            "de": (51.1657, 10.4515),
-            "japan": (36.2048, 138.2529),
-            "jp": (36.2048, 138.2529),
-            "usa": (37.0902, -95.7129),
-            "us": (37.0902, -95.7129),
-            "united states": (37.0902, -95.7129),
-            "china": (35.8617, 104.1954),
-            "cn": (35.8617, 104.1954),
-            "taiwan": (23.6978, 120.9605),
-            "tw": (23.6978, 120.9605),
-            "vietnam": (14.0583, 108.2772),
-            "vn": (14.0583, 108.2772),
-        }
-
         # Step A: Geographic bounding box filter (simulating PostGIS / Neo4j spatial query)
         impacted_candidates = []
         for s in suppliers:
@@ -229,12 +214,18 @@ class IncidentEngine:
         now = datetime.now(timezone.utc).isoformat()
         incident_id = f"inc_{uuid4().hex[:12]}"
 
+        event_data = geocode_signal(dict(event_data))
+
         # Parse event
         sev_val = event_data.get("severity", 0) or 0
         if isinstance(sev_val, str):
             severity_raw = _score_from_severity(sev_val)
         else:
             severity_raw = float(sev_val)
+
+        radius_km = float(event_data.get("radius_km", 500))
+        if str(event_data.get("location_precision") or "") == "country":
+            radius_km = max(radius_km * 12.0, 3000.0)
 
         event = DisruptionEvent(
             id=str(event_data.get("id", "")),
@@ -243,7 +234,7 @@ class IncidentEngine:
             severity=severity_raw,
             lat=float(event_data.get("lat", 0) or 0),
             lng=float(event_data.get("lng", 0) or 0),
-            radius_km=float(event_data.get("radius_km", 500)),
+            radius_km=radius_km,
             duration_days=float(event_data.get("duration_days", 7)),
             description=str(event_data.get("description", "")),
             source=str(event_data.get("source", event_data.get("analyst", ""))),
@@ -252,31 +243,13 @@ class IncidentEngine:
 
         # Resolve zero-location events to country centroids
         if event.lat == 0.0 and event.lng == 0.0:
-            COUNTRY_CENTROIDS = {
-                "india": (20.5937, 78.9629),
-                "in": (20.5937, 78.9629),
-                "germany": (51.1657, 10.4515),
-                "de": (51.1657, 10.4515),
-                "japan": (36.2048, 138.2529),
-                "jp": (36.2048, 138.2529),
-                "usa": (37.0902, -95.7129),
-                "us": (37.0902, -95.7129),
-                "united states": (37.0902, -95.7129),
-                "china": (35.8617, 104.1954),
-                "cn": (35.8617, 104.1954),
-                "taiwan": (23.6978, 120.9605),
-                "tw": (23.6978, 120.9605),
-                "vietnam": (14.0583, 108.2772),
-                "vn": (14.0583, 108.2772),
-            }
-            country_term = str(event_data.get("region") or event_data.get("location") or "").strip().lower()
-            if not country_term:
-                for cname in COUNTRY_CENTROIDS:
-                    if cname in event.title.lower():
-                        country_term = cname
-                        break
-            if country_term in COUNTRY_CENTROIDS:
-                event.lat, event.lng = COUNTRY_CENTROIDS[country_term]
+            resolved = lookup_country(str(event_data.get("region") or event_data.get("location") or ""))
+            if not resolved:
+                resolved = match_country_in_text(event.title)
+            if not resolved:
+                resolved = match_country_in_text(str(event_data.get("description") or ""))
+            if resolved:
+                event.lat, event.lng = resolved[0], resolved[1]
             else:
                 return None
 
@@ -336,6 +309,8 @@ class IncidentEngine:
             created_at=now,
             analyzed_at=analyzed_at,
             source_url=event.url,
+            source=str(event_data.get("source") or event.source or ""),
+            source_category=str(event_data.get("source_category") or ""),
         )
 
         return incident
