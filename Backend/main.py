@@ -2693,6 +2693,10 @@ async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[st
             "lng": lng_f,
             "radius_km": _event_impact_radius_km(inc),
             "exposure_usd": _ar_float(inc.get("total_exposure_usd"), 0),
+            "min_stockout_days": _ar_float(inc.get("min_stockout_days"), 0),
+            "affected_nodes": inc.get("affected_nodes") if isinstance(inc.get("affected_nodes"), list) else [],
+            "affected_suppliers": inc.get("affected_suppliers") if isinstance(inc.get("affected_suppliers"), list) else [],
+            "route_options": inc.get("route_options") if isinstance(inc.get("route_options"), list) else [],
         })
 
     return {
@@ -2700,6 +2704,19 @@ async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[st
         "routes": routes,
         "disruptions": disruptions,
         "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/api/config/maps")
+async def api_maps_config(user=Depends(verify_firebase_or_local_token)) -> dict[str, Any]:
+    """
+    Frontend Maps JS configuration. Reuses the same key consumed by routing/land.py
+    for the traffic-aware Routes API call.
+    """
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY", "").strip()
+    return {
+        "google_maps_api_key": api_key,
+        "configured": bool(api_key),
     }
 
 

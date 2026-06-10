@@ -189,6 +189,13 @@
     @apply bg-background text-foreground font-body antialiased;
   }
 
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0.25s;
+    animation-timing-function: cubic-bezier(0.19, 1, 0.22, 1);
+  }
+
   h1, h2, h3, h4, h5, h6 {
     @apply font-headline;
   }

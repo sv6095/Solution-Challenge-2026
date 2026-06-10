@@ -547,6 +547,10 @@ export interface ArAssetDisruption {
   lng: number;
   radius_km?: number;
   exposure_usd?: number;
+  min_stockout_days?: number;
+  affected_nodes?: Array<Record<string, unknown>>;
+  affected_suppliers?: Array<Record<string, unknown>>;
+  route_options?: Array<Record<string, unknown>>;
 }
 
 export interface ArAssetsResponse {
@@ -884,6 +888,9 @@ export const api = {
   ar: {
     assets: () => request<ArAssetsResponse>("/ar/assets"),
   },
+  config: {
+    maps: () => request<{ google_maps_api_key: string; configured: boolean }>("/config/maps"),
+  },
   workflowNetwork: {
     save: (payload: {
       user_id: string;
@@ -1081,4 +1088,3 @@ export interface GlobalDashboardBundle {
   minerals: { data: CriticalMineral[] };
   generated_at: string;
 }
-
