@@ -3,6 +3,7 @@ from __future__ import annotations
 from currency.frankfurter import convert_cost
 from currency.risk_index import compute_currency_risk_index
 from routing.air import air_route
+from routing.decision import build_hybrid_route, enrich_route_decision
 from routing.land import google_maps_live_route, land_route
 from routing.sea import sea_route
 
@@ -32,10 +33,13 @@ async def run_routing(
     live = await google_maps_live_route(origin_label, dest_label)
     if live:
         land["maps"] = live
+    hybrid = build_hybrid_route(sea, land)
 
     comparison = []
     for mode in (sea, air):
         comparison.append({**mode, "cost": await convert_cost(mode["cost_usd"], target_currency)})
+    if hybrid:
+        comparison.append({**hybrid, "cost": await convert_cost(hybrid["cost_usd"], target_currency)})
     comparison.append(
         {
             "mode": "land",
@@ -43,23 +47,18 @@ async def run_routing(
             "maps": {**land["maps"], "cost": await convert_cost(float(land["maps"]["cost_usd"]), target_currency)},
         }
     )
-    valid_modes = {"sea", "air", "land"}
-    mode_costs: dict[str, float] = {}
-    for row in comparison:
-        mode = str(row.get("mode") or "")
-        if mode not in valid_modes:
-            continue
-        if mode in {"sea", "air"}:
-            mode_costs[mode] = float(row.get("cost_usd") or 0.0)
-        else:
-            sssp = row.get("sssp") if isinstance(row.get("sssp"), dict) else {}
-            maps = row.get("maps") if isinstance(row.get("maps"), dict) else {}
-            mode_costs[mode] = min(float(sssp.get("cost_usd") or 0.0), float(maps.get("cost_usd") or 0.0))
-    if not mode_costs:
+    decision = enrich_route_decision(comparison, current_mode="sea")
+    recommended_mode = str(decision.get("recommended_mode") or "")
+    if not recommended_mode:
         raise ValueError("No valid route modes computed")
-    recommended_mode = min(mode_costs, key=mode_costs.get)
     return {
-        "route_comparison": comparison,
+        "route_comparison": decision["route_options"],
         "currency_risk_index": await compute_currency_risk_index(origin_country_code, dest_country_code),
         "recommended_mode": recommended_mode,
+        "next_best_mode": decision.get("next_best_mode", ""),
+        "delivery_answer": decision.get("delivery_answer", ""),
+        "next_best_route_answer": decision.get("next_best_route_answer", ""),
+        "cost_answer": decision.get("cost_answer", ""),
+        "customer_impact_answer": decision.get("customer_impact_answer", ""),
+        "decision_summary": decision.get("decision_summary", {}),
     }

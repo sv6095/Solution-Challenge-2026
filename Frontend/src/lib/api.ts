@@ -355,7 +355,13 @@ export interface WorkflowRouteRequest {
 export interface WorkflowRoutesResponse {
   route_comparison: Array<Record<string, unknown>>;
   currency_risk_index: number;
-  recommended_mode: "sea" | "air" | "land";
+  recommended_mode: "sea" | "air" | "land" | "hybrid";
+  next_best_mode?: "sea" | "air" | "land" | "hybrid" | "";
+  delivery_answer?: string;
+  next_best_route_answer?: string;
+  cost_answer?: string;
+  customer_impact_answer?: string;
+  decision_summary?: Record<string, unknown>;
 }
 
 export interface NaturalHazard {
@@ -820,7 +826,7 @@ export const api = {
       local_currency?: string;
       affected_suppliers?: Record<string, unknown>[];
     }) => request<WorkflowStartResponse>("/workflow/start", { method: "POST", body: JSON.stringify(payload) }),
-    approve: (workflowId: string, payload: { action: "reroute" | "backup_supplier" | "both"; mode?: "sea" | "air" | "land" | null }) =>
+    approve: (workflowId: string, payload: { action: "reroute" | "backup_supplier" | "both"; mode?: "sea" | "air" | "land" | "hybrid" | null }) =>
       request<WorkflowStartResponse>(`/workflow/${encodeURIComponent(workflowId)}/approve`, {
         method: "POST",
         body: JSON.stringify(payload),

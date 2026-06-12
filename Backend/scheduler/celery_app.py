@@ -17,11 +17,18 @@ celery_app.conf.update(
     result_serializer="json",
     timezone="UTC",
     enable_utc=True,
+    broker_connection_retry_on_startup=True,
+    task_track_started=True,
+    result_expires=86400,
     # Celery Beat config for distributed autonomous execution
     beat_schedule={
-        "poll-signals-every-30-minutes": {
+        "poll-signals-every-10-minutes": {
             "task": "scheduler.tasks.poll_signals",
-            "schedule": 1800.0, # 30 minutes
-        }
+            "schedule": float(os.getenv("SIGNAL_POLL_INTERVAL_SECONDS", "600")),
+        },
+        "refresh-worldmonitor-every-15-minutes": {
+            "task": "scheduler.tasks.refresh_worldmonitor",
+            "schedule": float(os.getenv("WORLDMONITOR_REFRESH_INTERVAL_SECONDS", "900")),
+        },
     }
 )

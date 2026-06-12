@@ -7,3 +7,4 @@ googleapis-common-protos==1.63.2
 grpc-google-iam-v1==0.14.0
 proto-plus==1.26.1
 upstash-redis==1.6.0
+redis==5.2.1

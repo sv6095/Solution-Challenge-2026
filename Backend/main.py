@@ -41,11 +41,12 @@ from currency.worldbank import get_inflation_rate
 from agents.assessment_agent import run_assessment
 from agents.rfq_agent import draft_rfq
 from agents.routing_agent import run_routing
+from routing.decision import enrich_route_decision
 from managers.chatbot_manager import ChatbotManager
 from pdf.certificate import generate_audit_certificate, generate_workflow_audit_report_pdf
 from services.tenant_quota import quota_manager
 from scheduler.signal_poll import start_signal_scheduler
-from ml.xgboost_model import MODEL_PATH, train_and_save_model
+from ml.xgboost_model import MODEL_PATH
 from workflows.langgraph_workflow import WorkflowGraphManager
 from services.llm_analysis import generate_workflow_analysis
 from agents.reasoning_logger import log_reasoning_step
@@ -98,7 +99,7 @@ from services.data_quality_guard import assess_context_quality
 from services.scenario_confidence import confidence_bounds
 from services.monte_carlo import simulate_incident_monte_carlo
 from services.intelligence_gap_tracker import build_intelligence_gap_report
-from services.threshold_tuner import run_threshold_tuning, get_all_thresholds, compute_stage_metrics, threshold_tuning_history
+from services.threshold_tuner import get_all_thresholds, compute_stage_metrics, threshold_tuning_history
 from services.event_bus import websocket_handler as ws_handler, connection_count as ws_connection_count, broadcast as ws_broadcast
 from services.cache_provider import cache_get, cache_set
 from models.supply_graph import CustomerSupplyGraph
@@ -131,11 +132,12 @@ from services.worldmonitor_fetcher import (
     get_chokepoint_status, get_shipping_stress, get_country_instability,
     get_strategic_risk, get_market_implications, get_active_fires,
     get_aviation_intel, get_air_quality, get_critical_minerals,
-    get_shipping_indices, get_shipping_rates, run_all_fetchers_once,
+    get_shipping_indices, get_shipping_rates,
 )
 
 init_store()
-start_signal_scheduler()
+if os.getenv("ENABLE_IN_PROCESS_SCHEDULERS", "false").strip().lower() in {"1", "true", "yes"}:
+    start_signal_scheduler()
 chatbot_manager = ChatbotManager()
 workflow_graph_manager = WorkflowGraphManager()
 
@@ -156,11 +158,22 @@ async def _cached_json(cache_key: str, ttl_seconds: int, producer) -> Any:
     return data
 
 
+def _enqueue_celery_task(task_name: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
+    try:
+        from scheduler.celery_app import celery_app
+
+        task = celery_app.send_task(task_name, args=args, kwargs=kwargs)
+        return {"status": "queued", "task_id": task.id, "task_name": task_name}
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Task queue unavailable: {exc}")
+
+
 @app.on_event("startup")
 async def _start_worldmonitor_cron():
     """Initialize Firebase Admin when configured; start worldmonitor background fetcher."""
     init_firebase_admin_app()
-    asyncio.create_task(worldmonitor_cron_loop())
+    if os.getenv("ENABLE_IN_PROCESS_SCHEDULERS", "false").strip().lower() in {"1", "true", "yes"}:
+        asyncio.create_task(worldmonitor_cron_loop())
 
 
 class Coordinates(BaseModel):
@@ -265,7 +278,7 @@ class WorkflowStartRequest(BaseModel):
 
 class WorkflowApprovalRequest(BaseModel):
     action: Literal["reroute", "backup_supplier", "both"]
-    mode: Literal["sea", "air", "land"] | None = None
+    mode: Literal["sea", "air", "land", "hybrid"] | None = None
 
 
 class WorkflowReportStageUpsert(BaseModel):
@@ -458,11 +471,12 @@ def _context_network_routes(user_id: str) -> list[dict[str, Any]]:
 
 
 def _network_mode_availability(routes: list[dict[str, Any]]) -> dict[str, bool]:
-    availability = {"sea": False, "air": False, "land": False}
+    availability = {"sea": False, "air": False, "land": False, "hybrid": False}
     for route in routes:
         mode = str(route.get("mode") or "").strip().lower()
         if mode in availability:
             availability[mode] = True
+    availability["hybrid"] = availability["sea"] and availability["land"]
     return availability
 
 
@@ -926,6 +940,27 @@ async def ping() -> dict:
     return {"status": "ok"}
 
 
+@app.get("/api/tasks/{task_id}")
+async def api_task_status(task_id: str, user=Depends(verify_firebase_or_local_token)) -> dict:
+    """Return Celery task status/result for async backend jobs."""
+    try:
+        from celery.result import AsyncResult
+        from scheduler.celery_app import celery_app
+
+        result = AsyncResult(task_id, app=celery_app)
+        payload: dict[str, Any] = {
+            "task_id": task_id,
+            "status": result.status,
+            "ready": result.ready(),
+            "successful": result.successful() if result.ready() else False,
+        }
+        if result.ready():
+            payload["result"] = result.result if result.successful() else str(result.result)
+        return payload
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Task queue unavailable: {exc}")
+
+
 @app.get("/health")
 async def health() -> dict:
     return {
@@ -938,11 +973,11 @@ async def health() -> dict:
     }
 
 
-@app.post("/ml/train/xgboost", response_model=TrainModelResponse)
-async def train_xgboost_model(user=Depends(verify_firebase_or_local_token)) -> TrainModelResponse:
-    result = train_and_save_model()
+@app.post("/ml/train/xgboost")
+async def train_xgboost_model(user=Depends(verify_firebase_or_local_token)) -> dict:
+    result = _enqueue_celery_task("scheduler.tasks.train_xgboost")
     add_audit("xgboost_train", user.get("sub", "local"))
-    return TrainModelResponse(**result)
+    return result
 
 
 @app.post("/auth/register")
@@ -1220,14 +1255,25 @@ async def workflow_routes(payload: RouteRequest, user=Depends(verify_firebase_or
     if network_routes:
         mode_availability = _network_mode_availability(network_routes)
         comparison = [row for row in comparison if isinstance(row, dict) and mode_availability.get(str(row.get("mode") or "").lower(), False)]
-        result["route_comparison"] = comparison
-        if str(result.get("recommended_mode") or "").lower() not in {str(r.get("mode") or "").lower() for r in comparison}:
-            result["recommended_mode"] = comparison[0]["mode"] if comparison else ""
+        constrained_decision = enrich_route_decision(comparison, current_mode="sea")
+        result.update(
+            {
+                "route_comparison": constrained_decision.get("route_options", comparison),
+                "recommended_mode": constrained_decision.get("recommended_mode", ""),
+                "next_best_mode": constrained_decision.get("next_best_mode", ""),
+                "delivery_answer": constrained_decision.get("delivery_answer", ""),
+                "next_best_route_answer": constrained_decision.get("next_best_route_answer", ""),
+                "cost_answer": constrained_decision.get("cost_answer", ""),
+                "customer_impact_answer": constrained_decision.get("customer_impact_answer", ""),
+                "decision_summary": constrained_decision.get("decision_summary", {}),
+            }
+        )
+        comparison = result["route_comparison"]
         result["mode_constraints"] = mode_availability
     seen_modes = {str(row.get("mode") or "") for row in comparison if isinstance(row, dict)}
     if not seen_modes:
         raise HTTPException(status_code=422, detail="Disconnected route set; no valid route outputs")
-    if str(result.get("recommended_mode") or "") not in {"sea", "air", "land"}:
+    if str(result.get("recommended_mode") or "") not in {"sea", "air", "land", "hybrid"}:
         raise HTTPException(status_code=422, detail="Invalid recommended transport mode")
     add_audit("workflow_routes", user.get("sub", "local"))
     wf_id = (payload.workflow_id or "").strip()
@@ -1237,9 +1283,14 @@ async def workflow_routes(payload: RouteRequest, user=Depends(verify_firebase_or
             "routing_agent",
             "route_comparison",
             f"Computed sea/air/land options; recommended_mode={result.get('recommended_mode')}, "
-            f"currency_risk_index={result.get('currency_risk_index')}.",
+            f"next_best_mode={result.get('next_best_mode')}, currency_risk_index={result.get('currency_risk_index')}.",
             "success",
-            {"recommended_mode": result.get("recommended_mode"), "currency_risk_index": result.get("currency_risk_index")},
+            {
+                "recommended_mode": result.get("recommended_mode"),
+                "next_best_mode": result.get("next_best_mode"),
+                "decision_summary": result.get("decision_summary"),
+                "currency_risk_index": result.get("currency_risk_index"),
+            },
         )
     return result
 
@@ -2155,8 +2206,7 @@ async def api_signals_sentiment() -> list[dict]:
 @app.post("/api/signals/refresh")
 async def api_signals_refresh() -> dict:
     """On-demand signal refresh — triggers immediate poll of all 12 source streams."""
-    from scheduler.signal_poll import force_poll
-    return await force_poll()
+    return _enqueue_celery_task("scheduler.tasks.poll_signals")
 
 
 @app.get("/api/audit")
@@ -3857,8 +3907,9 @@ async def api_global_minerals(response: Response):
 @app.post("/api/global/refresh")
 async def api_global_refresh(user=Depends(verify_firebase_or_local_token)):
     """Force-trigger an immediate refresh of all worldmonitor data sources."""
-    asyncio.create_task(run_all_fetchers_once())
-    return {"status": "refresh_triggered", "message": "All worldmonitor data sources are being refreshed"}
+    result = _enqueue_celery_task("scheduler.tasks.refresh_worldmonitor")
+    result["message"] = "All worldmonitor data sources are being refreshed"
+    return result
 
 
 @app.get("/api/global/summary")
@@ -3956,23 +4007,7 @@ async def api_train_gnn(user=Depends(verify_firebase_or_local_token)):
     tenant_id = _resolved_request_tenant(user)
     _require_incident_permission(user, Permission.INCIDENT_WRITE, tenant_id)
 
-    # Build graph from user context
-    try:
-        context = _context_payload_for_user(user_id)
-        suppliers = context.get("suppliers", [])
-        if not suppliers:
-            suppliers = _dataset_suppliers(limit=50)
-        from ml.gnn_stub import build_graph_from_dataset, build_graph_from_context
-        if context.get("suppliers"):
-            graph = build_graph_from_context(context)
-        else:
-            graph = build_graph_from_dataset(suppliers)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Cannot build graph: {exc}")
-
-    from ml.gnn_model import train_gnn_model
-    result = train_gnn_model(graph, epochs=100)
-    return result
+    return _enqueue_celery_task("scheduler.tasks.train_gnn", user_id, 100)
 
 
 @app.get("/api/ml/gnn/status")
@@ -4000,18 +4035,7 @@ async def api_tune_thresholds(user=Depends(verify_firebase_or_local_token)):
     """
     tenant_id = _resolved_request_tenant(user)
     _require_incident_permission(user, Permission.INCIDENT_WRITE, tenant_id)
-    report = run_threshold_tuning(tenant_id)
-
-    # Push tuning results via WebSocket
-    try:
-        await ws_broadcast(tenant_id, "threshold_tuned", {
-            "adjustments": report.get("total_adjustments", 0),
-            "timestamp": report.get("tuning_timestamp"),
-        })
-    except Exception:
-        pass
-
-    return report
+    return _enqueue_celery_task("scheduler.tasks.tune_thresholds", tenant_id)
 
 
 @app.get("/api/governance/thresholds")

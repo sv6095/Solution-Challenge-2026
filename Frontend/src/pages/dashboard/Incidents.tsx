@@ -130,7 +130,7 @@ const SEVERITY: Record<string, { bg: string; text: string; icon: string }> = {
   LOW: { bg: "bg-green-50 border-green-200", text: "text-green-600", icon: "○" },
 };
 
-const MODE_ICONS: Record<string, React.ElementType> = { air: Plane, sea: Ship, land: Truck };
+const MODE_ICONS: Record<string, React.ElementType> = { air: Plane, sea: Ship, land: Truck, hybrid: Truck };
 
 const Incidents = () => {
   const [searchParams, setSearchParams] = useSearchParams();

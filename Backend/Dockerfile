@@ -58,7 +58,8 @@ ENV VIRTUAL_ENV=/venv \
 COPY . .
 
 # Run as a non-root user (principle of least privilege).
-RUN addgroup --system appgroup \
+RUN mkdir -p /app/data \
+    && addgroup --system appgroup \
     && adduser --system --ingroup appgroup appuser \
     && chown -R appuser:appgroup /app
 

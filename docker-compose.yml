@@ -1,53 +1,65 @@
 # docker-compose.yml
-# Praecantator backend + nginx reverse proxy for  deployment.
+# Praecantator backend, Redis/Celery workers, and nginx reverse proxy.
 #
-# Usage :
-#   docker compose up -d --build        # first run / after code changes
-#   docker compose logs -f backend      # stream backend logs
-#   docker compose ps                   # check health status
-#   docker compose down                 # stop everything
+# Usage:
+#   docker compose up -d --build
+#   docker compose logs -f backend celery-worker celery-beat
+#   docker compose ps
+#   docker compose down
 #
-# Prerequisites :
-#   1. Backend/.env filled in (copy from Backend/.env.docker.example)
-#   2. secrets/gcp-sa.json placed (your GCP service account key)
+# Prerequisites:
+#   1. Backend/.env filled in
+#   2. secrets/gcp-sa.json placed when using GCP services
 
 services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: praecantator-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
 
-  # ── FastAPI backend ──────────────────────────────────────────────────────────
   backend:
     build:
       context: ./Backend
       dockerfile: Dockerfile
     container_name: praecantator-backend
     restart: unless-stopped
-    # Port 8000 is NOT published to the host — nginx handles all external traffic.
     expose:
       - "8000"
     env_file:
       - ./Backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CACHE_PROVIDER: redis
+      LOCAL_DB_PATH: /app/data/local_fallback.db
+      ENABLE_IN_PROCESS_SCHEDULERS: "false"
     volumes:
-      # GCP service-account key — read-only, never baked into the image.
       - ./secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
-      # Named volume for SQLite fallback DB (local_fallback.db).
-      # Without this, all SQLite data (incidents, signals, contexts, cache)
-      # is wiped on every container restart or rebuild.
-      - backend-data:/app
+      - backend-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
     networks:
       - app-network
     healthcheck:
-      # Use /api/ping (no auth, no DB calls) not /health (runs disruption_snapshot + registry queries).
-      # /api/ping is the lightweight keepalive defined in main.py.
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/ping"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 90s        # torch import + model load takes time
-    # torch + ML libs open many file descriptors. Raise the nofile limit.
+      start_period: 90s
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
-    # APScheduler runs background jobs; give it 30s to finish before SIGKILL.
     stop_grace_period: 30s
     logging:
       driver: json-file
@@ -55,18 +67,75 @@ services:
         max-size: "50m"
         max-file: "3"
 
-  # ── nginx reverse proxy ──────────────────────────────────────────────────────
+  celery-worker:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: praecantator-celery-worker
+    restart: unless-stopped
+    command: ["celery", "-A", "scheduler.celery_app:celery_app", "worker", "--loglevel=INFO", "--concurrency=2"]
+    env_file:
+      - ./Backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CACHE_PROVIDER: redis
+      LOCAL_DB_PATH: /app/data/local_fallback.db
+      ENABLE_IN_PROCESS_SCHEDULERS: "false"
+    volumes:
+      - ./secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
+      - backend-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - app-network
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+
+  celery-beat:
+    build:
+      context: ./Backend
+      dockerfile: Dockerfile
+    container_name: praecantator-celery-beat
+    restart: unless-stopped
+    command: ["celery", "-A", "scheduler.celery_app:celery_app", "beat", "--loglevel=INFO"]
+    env_file:
+      - ./Backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      CACHE_PROVIDER: redis
+      LOCAL_DB_PATH: /app/data/local_fallback.db
+      ENABLE_IN_PROCESS_SCHEDULERS: "false"
+    volumes:
+      - ./secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
+      - backend-data:/app/data
+    depends_on:
+      redis:
+        condition: service_healthy
+      celery-worker:
+        condition: service_started
+    networks:
+      - app-network
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+
   nginx:
     image: nginx:1.27-alpine
     container_name: praecantator-nginx
     restart: unless-stopped
     ports:
       - "80:80"
-      - "443:443"              # Reserved for HTTPS — see nginx/nginx.conf
+      - "443:443"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      # Uncomment after running Certbot to mount Let's Encrypt certs:
-      # - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       backend:
         condition: service_healthy
@@ -83,4 +152,5 @@ networks:
     driver: bridge
 
 volumes:
-  backend-data:    # Persists SQLite fallback DB across restarts and rebuilds.
+  backend-data:
+  redis-data:

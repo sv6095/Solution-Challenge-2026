@@ -281,7 +281,7 @@ function LandRouteViewer({ fromAP, toAP, incTitle }: { fromAP: AP, toAP: AP, inc
   );
 }
 
-function AirRouteViewer({ fromAP, toAP, incTitle, costUsd, mode, hubs }: { fromAP: AP, toAP: AP, incTitle: string, costUsd: number, mode: "air"|"sea", hubs: AP[] }) {
+function AirRouteViewer({ fromAP, toAP, incTitle, costUsd, mode, hubs }: { fromAP: AP, toAP: AP, incTitle: string, costUsd: number, mode: "air"|"sea"|"hybrid", hubs: AP[] }) {
   const navigate = useNavigate();
   const mapRef = useRef<MapRef>(null);
   const [active, setActive] = useState(0);
@@ -311,9 +311,9 @@ function AirRouteViewer({ fromAP, toAP, incTitle, costUsd, mode, hubs }: { fromA
 
   const MAP_2D = "https://tiles.openfreemap.org/styles/bright";
 
-  const accentBg    = mode==="air"?"#fef2f2":"#eff6ff";
-  const accentBdr   = mode==="air"?"#fecaca":"#bfdbfe";
-  const accentText  = mode==="air"?"#dc2626":"#2563eb";
+  const accentBg    = mode==="air"?"#fef2f2":mode==="hybrid"?"#f0fdf4":"#eff6ff";
+  const accentBdr   = mode==="air"?"#fecaca":mode==="hybrid"?"#bbf7d0":"#bfdbfe";
+  const accentText  = mode==="air"?"#dc2626":mode==="hybrid"?"#16a34a":"#2563eb";
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 120px)",background:"#f8fafc",fontFamily:"Inter,system-ui,sans-serif"}}>
@@ -323,10 +323,10 @@ function AirRouteViewer({ fromAP, toAP, incTitle, costUsd, mode, hubs }: { fromA
           <ArrowLeft size={13}/> Back
         </button>
         <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-          {mode==="air"?<Plane size={15} style={{color:"#dc2626",flexShrink:0}}/>:<Plane size={15} style={{color:"#2563eb",flexShrink:0}}/>}
+          {mode==="air"?<Plane size={15} style={{color:"#dc2626",flexShrink:0}}/>:<Plane size={15} style={{color:accentText,flexShrink:0}}/>}
           <div>
             <p style={{fontSize:10,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"#94a3b8",margin:0}}>
-              {mode==="air"?"Air Freight":"Sea Freight"} · {incTitle}
+              {mode==="air"?"Air Freight":mode==="hybrid"?"Hybrid Freight":"Sea Freight"} · {incTitle}
             </p>
             <p style={{fontSize:13,fontWeight:700,color:"#0f172a",margin:0}}>
               {fromAP.city} ({fromAP.iata||fromAP.icao}) → {toAP.city} ({toAP.iata||toAP.icao})
@@ -456,7 +456,7 @@ function AirRouteViewer({ fromAP, toAP, incTitle, costUsd, mode, hubs }: { fromA
 export default function RouteViewer() {
   const [params] = useSearchParams();
 
-  const mode     = (params.get("mode") || "air") as "air"|"land"|"sea";
+  const mode     = (params.get("mode") || "air") as "air"|"land"|"sea"|"hybrid";
   const costUsd  = Number(params.get("cost") || 0);
   const incTitle = params.get("incident") || "Route Visualisation";
 

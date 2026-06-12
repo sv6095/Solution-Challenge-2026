@@ -15,7 +15,7 @@ import logging
 
 from services.event_freshness import is_incident_fresh
 
-DB_PATH = Path(__file__).resolve().parent.parent / "local_fallback.db"
+DB_PATH = Path(os.getenv("LOCAL_DB_PATH") or (Path(__file__).resolve().parent.parent / "local_fallback.db"))
 
 
 def _connect_db():

@@ -4,7 +4,7 @@
 
 Praecantator is an enterprise-grade platform that continuously monitors global supply chain networks, predicts cascading disruption risks using graph-based intelligence and machine learning, and autonomously orchestrates mitigation strategies — optimal rerouting, backup supplier engagement, RFQ generation, and audit-grade decision trails — through a multi-agent system with human-in-the-loop governance.
 
-The platform transitions operations from static, backward-looking dashboards to proactive, forward-looking AI workflows. Operators interact through a tactical command center while autonomous pipelines handle detection, assessment, routing simulation, and action preparation in seconds.
+The platform transitions operations from static, backward-looking dashboards to proactive, forward-looking AI workflows. Operators interact through a tactical command center while autonomous pipelines handle detection, assessment, and disruption response in seconds, automatically evaluating every feasible sea, land, and air logistics path to recommend the fastest, cheapest, or lowest-risk option.
 
 ---
 
@@ -53,7 +53,7 @@ Praecantator addresses these gaps with continuous signal ingestion, graph-based 
 | **Graph Risk Propagation** | `CustomerSupplyGraph` models suppliers, logistics hubs, and edges; GNN-style propagation estimates downstream exposure |
 | **Autonomous Response** | Pipeline runs DETECT → ASSESS → DECIDE → ACT → AUDIT in under 3 seconds for qualifying events |
 | **Human Governance** | High-value or high-risk actions pause at checkpoints until an authorized operator approves |
-| **Multi-Modal Routing** | Sea, land, and air corridor simulation with lane multipliers, incoterm liability weights, and ERP-aware throughput |
+| **Multi-Modal Routing** | Automatically evaluates every feasible sea, land, and air logistics path and recommends the fastest, cheapest, or lowest-risk option during disruption |
 | **Procurement Automation** | RFQ drafts generated per affected supplier; email dispatch with action confirmation ledger |
 | **Audit & Compliance** | Every reasoning step, checkpoint, feedback verdict, and action status is persisted and exportable as PDF |
 | **Multi-Tenancy** | Strict tenant isolation — no cross-customer data bleed; DUNS/LEI entity resolution for shared supplier overlays |
@@ -288,7 +288,7 @@ The core cognitive loop is implemented in `Backend/agents/autonomous_pipeline.py
 |---|---|---|
 | **DETECT** | `signal_agent`, `political_risk_agent` | Match live signals (NASA EONET, GDACS, GDELT, news) against customer supplier coordinates using haversine distance and dynamic impact radii |
 | **ASSESS** | `assessment_agent`, GNN stub | Propagate risk through `CustomerSupplyGraph`; compute VaR, BOM criticality, tier weights, lane disruption multipliers |
-| **DECIDE** | `routing_agent`, `logistics_risk_agent`, `tariff_risk_agent` | Simulate sea/land/air corridors; rank alternatives by cost, lead time, and incoterm liability |
+| **DECIDE** | `routing_agent`, `logistics_risk_agent`, `tariff_risk_agent` | Evaluate feasible sea, land, and air routes; recommend the fastest, cheapest, or lowest-risk option for the disruption context |
 | **ACT** | `rfq_agent`, `action_confirmation` | Draft and optionally send RFQs; dispatch route confirmations; track DRAFT → SENT → DELIVERED → ACKNOWLEDGED |
 | **AUDIT** | `reasoning_logger`, `pdf/certificate` | Append immutable reasoning steps; generate compliance certificates and workflow audit PDFs |
 
@@ -754,7 +754,7 @@ All infrastructure providers are swappable via environment variables in `Backend
 
 ### Routing Engine
 
-Multi-modal routing in `Backend/routing/`:
+Praecantator automatically evaluates every feasible logistics path and recommends the fastest, cheapest, or lowest-risk option during disruption. The routing engine in `Backend/routing/` supports that recommendation with mode-specific models:
 
 | Mode | Module | Logic |
 |---|---|---|

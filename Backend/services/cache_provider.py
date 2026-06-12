@@ -8,9 +8,34 @@ from typing import Any
 from .firestore_store import cache_get_entry, cache_prune_expired, cache_set_entry
 
 CACHE_PROVIDER = (os.getenv("CACHE_PROVIDER") or "memory").strip().lower()
+REDIS_URL = (os.getenv("REDIS_URL") or "redis://localhost:6379/0").strip()
 
 # In-memory: value -> (payload, expires_at_monotonic or None)
 _memory: dict[str, tuple[Any, float | None]] = {}
+_redis_client: Any | None = None
+
+
+def _cache_provider() -> str:
+    return (os.getenv("CACHE_PROVIDER") or CACHE_PROVIDER or "memory").strip().lower()
+
+
+def _redis_url() -> str:
+    return (os.getenv("REDIS_URL") or REDIS_URL or "redis://localhost:6379/0").strip()
+
+
+async def _get_redis_client() -> Any | None:
+    global _redis_client
+    if _redis_client is not None:
+        return _redis_client
+    try:
+        from redis.asyncio import Redis
+
+        _redis_client = Redis.from_url(_redis_url(), decode_responses=True, socket_connect_timeout=1.0, socket_timeout=2.0)
+        await _redis_client.ping()
+        return _redis_client
+    except Exception:
+        _redis_client = None
+        return None
 
 
 def _memory_get(key: str) -> Any | None:
@@ -30,13 +55,27 @@ def _memory_set(key: str, value: Any, ttl_seconds: int) -> None:
 
 
 async def cache_get(key: str) -> Any | None:
-    if CACHE_PROVIDER == "redis":
+    if _cache_provider() == "redis":
+        client = await _get_redis_client()
+        if client is not None:
+            try:
+                raw = await client.get(key)
+                if raw is None:
+                    return None
+                try:
+                    return json.loads(raw)
+                except Exception:
+                    return raw
+            except Exception:
+                pass
         try:
             from upstash_redis import Redis
 
             url = (os.getenv("UPSTASH_REDIS_REST_URL") or "").strip()
             token = (os.getenv("UPSTASH_REDIS_REST_TOKEN") or "").strip()
-            r = Redis(url=url, token=token) if url and token else Redis.from_env()
+            if not (url and token):
+                raise RuntimeError("Upstash REST credentials are not configured")
+            r = Redis(url=url, token=token)
             raw = r.get(key)
             if raw is None:
                 return None
@@ -58,13 +97,24 @@ async def cache_get(key: str) -> Any | None:
 
 
 async def cache_set(key: str, value: Any, ttl_seconds: int = 1800) -> None:
-    if CACHE_PROVIDER == "redis":
+    if _cache_provider() == "redis":
+        client = await _get_redis_client()
+        if client is not None:
+            try:
+                payload = json.dumps(value) if not isinstance(value, (str, bytes)) else value
+                await client.set(key, payload, ex=ttl_seconds if ttl_seconds > 0 else None)
+                cache_set_entry(key, value, ttl_seconds)
+                return
+            except Exception:
+                pass
         try:
             from upstash_redis import Redis
 
             url = (os.getenv("UPSTASH_REDIS_REST_URL") or "").strip()
             token = (os.getenv("UPSTASH_REDIS_REST_TOKEN") or "").strip()
-            r = Redis(url=url, token=token) if url and token else Redis.from_env()
+            if not (url and token):
+                raise RuntimeError("Upstash REST credentials are not configured")
+            r = Redis(url=url, token=token)
             payload = json.dumps(value) if not isinstance(value, (str, bytes)) else value
             r.set(key, payload, ex=ttl_seconds)
             cache_set_entry(key, value, ttl_seconds)

@@ -25,6 +25,7 @@ from agents.reasoning_logger import log_reasoning_step, current_tenant_id
 from agents.governance import PATH_AUTONOMOUS, run_with_policy, validate_agent_allowed
 from ml.gnn_stub import DisruptionEvent, SupplyChainGraph
 from models.supply_graph import CustomerSupplyGraph
+from routing.decision import enrich_route_decision
 from services.action_confirmation import action_summary_for_incident, dispatch_action, mark_failed
 from services.governance_checkpoint import (
     evaluate_checkpoint_triggers,
@@ -427,17 +428,29 @@ def _generate_route_options(
             "status_label": "N/A",
         })
 
-    # Re-evaluate recommendation:
-    # If sea is faster AND cheaper AND not disrupted, prefer sea
-    viable = [r for r in routes if r["transit_days"] > 0 and r["risk_score"] < 0.5]
-    if viable:
-        best = min(viable, key=lambda r: (r["risk_score"], r["transit_days"]))
-        for r in routes:
-            r["recommended"] = (r["mode"] == best["mode"])
-            if r["recommended"]:
-                r["status_label"] = "Best"
+    sea_option = next((r for r in routes if r.get("mode") == "sea" and r.get("transit_days", 0) > 0), None)
+    land_option = next((r for r in routes if r.get("mode") == "land" and r.get("transit_days", 0) > 0), None)
+    if sea_option and direct_dist > 900:
+        if land_option:
+            land_days = float(land_option["transit_days"])
+            land_cost = float(land_option["cost_usd"])
+        else:
+            land_days = max(1.0, direct_dist / 650)
+            land_cost = direct_dist * 0.18
+        hybrid_days = round((float(sea_option["transit_days"]) * 0.58) + (land_days * 0.32) + 1.0, 1)
+        hybrid_cost = round((float(sea_option["cost_usd"]) * 0.72) + (land_cost * 0.42), 0)
+        routes.append({
+            "mode": "hybrid",
+            "description": f"Land + sea hybrid corridor - {round(direct_dist, 0):.0f}km equivalent",
+            "transit_days": hybrid_days,
+            "cost_usd": hybrid_cost,
+            "risk_score": 0.28 if not sea_disrupted else 0.38,
+            "recommended": False,
+            "status_label": "Balanced",
+        })
 
-    return routes
+    decision = enrich_route_decision(routes, current_mode="sea")
+    return decision["route_options"]
 
 
 # ── Core Pipeline ─────────────────────────────────────────────────────────────

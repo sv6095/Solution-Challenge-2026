@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import hashlib
 from contextlib import closing
@@ -8,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
-DB_PATH = Path(__file__).resolve().parents[1] / "local_fallback.db"
+DB_PATH = Path(os.getenv("LOCAL_DB_PATH") or (Path(__file__).resolve().parents[1] / "local_fallback.db"))
 
 
 def _conn() -> sqlite3.Connection:

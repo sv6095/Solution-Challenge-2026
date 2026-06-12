@@ -8,11 +8,11 @@ type Props = {
   workflowId: string;
   signal: Record<string, unknown> | null;
   affectedSuppliers: Record<string, unknown>[];
-  recommendedMode: "sea" | "air" | "land" | "";
-  selectedMode: "sea" | "air" | "land" | "";
+  recommendedMode: "sea" | "air" | "land" | "hybrid" | "";
+  selectedMode: "sea" | "air" | "land" | "hybrid" | "";
   stageDecision: "reroute" | "backup_supplier";
   routeComparison: RouteRow[];
-  onApproved?: (payload: { action: "reroute" | "backup_supplier" | "both"; mode?: "sea" | "air" | "land" | null }) => void;
+  onApproved?: (payload: { action: "reroute" | "backup_supplier" | "both"; mode?: "sea" | "air" | "land" | "hybrid" | null }) => void;
 };
 
 export function DecisionConsole({
