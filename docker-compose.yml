@@ -1,13 +1,13 @@
 # docker-compose.yml
-# Praecantator backend + nginx reverse proxy for EC2 deployment.
+# Praecantator backend + nginx reverse proxy for  deployment.
 #
-# Usage on EC2:
+# Usage :
 #   docker compose up -d --build        # first run / after code changes
 #   docker compose logs -f backend      # stream backend logs
 #   docker compose ps                   # check health status
 #   docker compose down                 # stop everything
 #
-# Prerequisites on EC2 host:
+# Prerequisites :
 #   1. Backend/.env filled in (copy from Backend/.env.docker.example)
 #   2. secrets/gcp-sa.json placed (your GCP service account key)
 
