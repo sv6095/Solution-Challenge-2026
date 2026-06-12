@@ -1,0 +1,51 @@
+# ── Python cache ─────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# ── Virtual environments ──────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+
+# ── Secrets — NEVER bake into the image ──────────────────────────────────────
+.env
+.env.*
+secrets/
+
+# ── Local SQLite databases (large, dev-only) ──────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+
+# ── Dev / test / dataset artefacts ───────────────────────────────────────────
+scratch/
+tests/
+Dataset/
+docs/
+
+# ── Temporary and generated files ────────────────────────────────────────────
+*.pdf
+tmp_*
+*.log
+*.pyc
+*.pyo
+*.pyc.*
+_tmp_*
+
+# ── IDE and OS ────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ── Git ───────────────────────────────────────────────────────────────────────
+.git/
+.gitignore
+
+# ── Build artefacts ───────────────────────────────────────────────────────────
+build/
+dist/
+*.egg-info/

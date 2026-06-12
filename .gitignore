@@ -5,5 +5,19 @@
 !/Backend/
 !/Frontend/
 !/Test/
+!/docs/
+!/nginx/
+!/secrets/
 !/README.md
 !/.gitignore
+!/render.yaml
+!/docker-compose.yml
+!/deploy.sh
+
+# Keep the secrets/ directory in git but never commit actual key files
+/secrets/*.json
+/secrets/*.p12
+/secrets/*.pem
+.sh
+docs/DEPLOYMENT_FIREBASE.md
+docs/SETUP_GUIDE.md

@@ -17,7 +17,8 @@ _initialized = False
 def init_firebase_admin_app() -> None:
     """
     Initialize Firebase Admin once when verifying ID tokens or using Firestore-backed auth.
-    On Render, set GOOGLE_APPLICATION_CREDENTIALS to the mounted service account JSON path.
+    On Docker, set GOOGLE_APPLICATION_CREDENTIALS to /secrets/gcp-sa.json
+    (the service account key bind-mounted via docker-compose.yml).
     """
     global _initialized
     if _initialized:
@@ -43,9 +44,9 @@ def init_firebase_admin_app() -> None:
         if needs_credentials:
             raise RuntimeError(
                 f"GOOGLE_APPLICATION_CREDENTIALS points to a missing file: {cred_path!r}. "
-                "On Render: Dashboard → your web service → Environment → Secret Files — upload your "
-                "Firebase/GCP service account JSON and set this variable to exactly "
-                "/etc/secrets/<that-filename>.json, then redeploy."
+                "On Docker: ensure secrets/gcp-sa.json exists on the host and is bind-mounted "
+                "into the container at /secrets/gcp-sa.json (see docker-compose.yml volumes). "
+                "Set GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json in Backend/.env."
             ) from None
         logger.warning(
             "GOOGLE_APPLICATION_CREDENTIALS is set but file is missing (%s); ignoring for ADC discovery",
@@ -66,7 +67,8 @@ def init_firebase_admin_app() -> None:
             logger.exception("Firebase Admin failed to initialize; AUTH_PROVIDER=firebase requires valid credentials")
             raise RuntimeError(
                 "AUTH_PROVIDER=firebase but Firebase Admin could not initialize. "
-                "On Render, mount a service account JSON and set GOOGLE_APPLICATION_CREDENTIALS to its path."
+                "On Docker: ensure secrets/gcp-sa.json is bind-mounted at /secrets/gcp-sa.json "
+                "and GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-sa.json is set in Backend/.env."
             ) from exc
         logger.warning("Firebase Admin could not initialize (Firestore may still use ADC): %s", exc)
     _initialized = True

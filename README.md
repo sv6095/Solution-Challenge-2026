@@ -45,7 +45,8 @@ All external actions require stringent transparency and mirror physical operatio
 
 ## 🛠️ Getting Started & Local Development
 
-**Production (Firebase, Render, Vercel, Google sign-in):** step-by-step checklist → [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md). Detailed deploy and troubleshooting → [`docs/DEPLOYMENT_FIREBASE.md`](docs/DEPLOYMENT_FIREBASE.md).
+**Docker deployment (backend) + Vercel (frontend):** step-by-step checklist → [`docs/SETUP_GUIDE.md`](docs/SETUP_GUIDE.md).  
+Key files: [`docker-compose.yml`](docker-compose.yml) · [`nginx/nginx.conf`](nginx/nginx.conf) · [`deploy.sh`](deploy.sh).
 
 ### Prerequisites
 * Python 3.11+ (see `Backend/.python-version`; required for current dependency pins)
