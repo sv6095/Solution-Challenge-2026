@@ -53,7 +53,7 @@ export function HeroGlobe() {
         width={dimensions.width}
         height={dimensions.height}
         backgroundColor="rgba(0,0,0,1)"
-        globeImageUrl="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=" // Pure white 1x1 base64
+        globeImageUrl="//unpkg.com/three-globe/example/img/earth-night.jpg" // Dark globe with light areas
         arcsData={sampleArcs}
         arcStartLat="startLat"
         arcStartLng="startLng"
@@ -61,8 +61,8 @@ export function HeroGlobe() {
         arcEndLng="endLng"
         arcColor="color"
         arcStroke={1.5} // Make arcs thicker
-        arcDashLength={0.4}
-        arcDashGap={0.2}
+        arcDashLength={1} // Full length dash
+        arcDashGap={0} // No spaces between dashes
         arcDashAnimateTime={1500}
         arcAltitude="arcAlt"
         atmosphereColor="#ef4444"
