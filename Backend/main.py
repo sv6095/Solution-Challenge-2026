@@ -113,6 +113,7 @@ _CORS_ORIGINS = list(dict.fromkeys(_DEV_ORIGINS + _env_origins))
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_CORS_ORIGINS,
+    allow_credentials=True,   # Required for requests that carry Authorization / Cookie headers
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Request-Id"],
