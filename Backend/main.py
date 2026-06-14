@@ -159,6 +159,34 @@ async def _cached_json(cache_key: str, ttl_seconds: int, producer) -> Any:
     return data
 
 
+# ---------------------------------------------------------------------------
+# Background purge helper — fires purge_stale_incidents at most once per
+# 5 minutes per tenant so it never blocks a request path.
+# ---------------------------------------------------------------------------
+_PURGE_INTERVAL_S: float = 300.0  # 5 minutes
+_last_purge_ts: dict[str, float] = {}
+
+
+def _maybe_purge_stale(tenant_id: str) -> None:
+    """Schedule purge_stale_incidents as a background task, rate-limited per tenant."""
+    import time
+    now = time.monotonic()
+    last = _last_purge_ts.get(tenant_id, 0.0)
+    if now - last < _PURGE_INTERVAL_S:
+        return  # Already ran recently — skip
+    _last_purge_ts[tenant_id] = now
+
+    async def _run() -> None:
+        try:
+            await asyncio.get_event_loop().run_in_executor(
+                None, lambda: purge_stale_incidents(tenant_id=tenant_id, max_age_days=7)
+            )
+        except Exception as exc:
+            logger.warning("Background purge_stale_incidents failed for %s: %s", tenant_id, exc)
+
+    asyncio.ensure_future(_run())
+
+
 def _enqueue_celery_task(task_name: str, *args: Any, **kwargs: Any) -> dict[str, Any]:
     try:
         from scheduler.celery_app import celery_app
@@ -797,8 +825,14 @@ def _dataset_suppliers(limit: int = 50) -> list[dict[str, Any]]:
 
 
 def _api_risk_events() -> list[dict]:
+    # Imports hoisted out of the loop to avoid repeated module lookups.
+    from services.event_freshness import extract_event_timestamp, is_event_fresh
+    from services.signal_geocode import geocode_signal
+
     events: list[dict] = []
-    for idx, sig in enumerate(_parsed_signals(limit=5000)):
+    # Cap at 500 — rendering more than this is never useful and scanning
+    # 5 000 signals adds ~200–400 ms on every cold cache miss.
+    for idx, sig in enumerate(_parsed_signals(limit=500)):
         severity_value = float(sig.get("severity", 0) or 0)
         severity_label = "LOW"
         if severity_value >= 8:
@@ -807,8 +841,6 @@ def _api_risk_events() -> list[dict]:
             severity_label = "HIGH"
         elif severity_value >= 4:
             severity_label = "MEDIUM"
-        from services.event_freshness import extract_event_timestamp, is_event_fresh
-        from services.signal_geocode import geocode_signal
 
         sig = geocode_signal(sig)
         title_str = str(sig.get("title") or sig.get("event_type") or "Disruption signal")
@@ -1476,7 +1508,8 @@ async def api_dashboard_kpis(user=Depends(verify_firebase_or_local_token)) -> di
 
 @app.get("/api/dashboard/events")
 async def api_dashboard_events() -> list[dict]:
-    return await _cached_json("dashboard_events", 15, _api_risk_events)
+    # TTL raised 15→60 s: risk events from external sources don't change sub-minute.
+    return await _cached_json("dashboard_events", 60, _api_risk_events)
 
 
 @app.get("/api/dashboard/workflows")
@@ -2902,8 +2935,8 @@ class IncidentApproveRequest(BaseModel):
 async def api_list_incidents(status: str | None = None, user=Depends(verify_firebase_or_local_token)) -> list[dict]:
     """List all incidents, optionally filtered by status."""
     tenant_id = _resolved_request_tenant(user)
-    # Auto-resolve stale incidents (>7 days in active status)
-    purge_stale_incidents(tenant_id=tenant_id, max_age_days=7)
+    # Fire stale-incident purge in the background (rate-limited per tenant, non-blocking).
+    _maybe_purge_stale(tenant_id)
     resource_tenant = tenant_id
     _require_incident_permission(user, Permission.INCIDENT_READ, resource_tenant)
     return list_incidents(status=status, limit=100, tenant_id=tenant_id)
@@ -2912,15 +2945,22 @@ async def api_list_incidents(status: str | None = None, user=Depends(verify_fire
 @app.get("/api/incidents/summary")
 async def api_incidents_summary(response: Response, user=Depends(verify_firebase_or_local_token)) -> dict:
     """Summary counts for Command dashboard."""
-    _set_cache_headers(response, public=False, max_age=30)
+    _set_cache_headers(response, public=False, max_age=60)
     tenant_id = _resolved_request_tenant(user)
     resource_tenant = tenant_id
     _require_incident_permission(user, Permission.INCIDENT_READ, resource_tenant)
     cache_key = f"api:incidents:summary:{tenant_id}"
 
     def _compute() -> dict[str, Any]:
-        counts = count_incidents_by_status(tenant_id)
+        from collections import Counter
+        # Single Firestore scan — derive status counts from the same result set
+        # instead of calling count_incidents_by_status (which issues a 2nd 1000-doc scan).
         incidents = list_incidents(limit=500, tenant_id=tenant_id)
+        counts = dict(Counter(
+            str(i.get("status") or "").strip()
+            for i in incidents
+            if i.get("status")
+        ))
         critical = len([
             i for i in incidents
             if i.get("severity") in ("CRITICAL", "HIGH")
@@ -2942,7 +2982,7 @@ async def api_incidents_summary(response: Response, user=Depends(verify_firebase
             "status_breakdown": counts,
         }
 
-    return await _cached_json(cache_key, 30, _compute)
+    return await _cached_json(cache_key, 60, _compute)
 
 
 @app.get("/api/incidents/{incident_id}")
@@ -3088,8 +3128,8 @@ async def api_generate_incidents(
         except Exception:
             context = {}
 
-    # Auto-resolve stale incidents (>7 days in active status)
-    purge_stale_incidents(tenant_id=resource_tenant, max_age_days=7)
+    # Fire stale-incident purge in the background (rate-limited per tenant, non-blocking).
+    _maybe_purge_stale(resource_tenant)
 
     # Get live events and supplier dataset
     events = _api_risk_events()
@@ -3320,18 +3360,28 @@ async def api_command_briefing(response: Response, user=Depends(verify_firebase_
     The Command dashboard data — everything in one call.
     This is what the user sees when they open the app.
     """
-    _set_cache_headers(response, public=False, max_age=30)
+    _set_cache_headers(response, public=False, max_age=60)
     tenant_id = _resolved_request_tenant(user)
+    # Fire stale-incident purge in the background (rate-limited per tenant, non-blocking).
+    _maybe_purge_stale(tenant_id)
     cache_key = f"api:command:briefing:{tenant_id}"
 
     def _compute() -> dict[str, Any]:
+        from collections import Counter
         from services.event_freshness import is_incident_fresh
 
-        # Auto-resolve stale incidents (>7 days in active status)
-        purge_stale_incidents(tenant_id=tenant_id, max_age_days=7)
-        all_incidents = [i for i in list_incidents(limit=100, tenant_id=tenant_id) if is_incident_fresh(i)]
+        # Single Firestore scan for both all_incidents and summary_incidents.
+        # Previously two separate queries (limit=100 + limit=500) were issued.
         summary_incidents = [i for i in list_incidents(limit=500, tenant_id=tenant_id) if is_incident_fresh(i)]
-        counts = count_incidents_by_status(tenant_id)
+        all_incidents = summary_incidents[:100]
+
+        # Derive status counts from the fetched list — avoids a separate
+        # count_incidents_by_status() call that fetches another 1000 docs.
+        counts = dict(Counter(
+            str(i.get("status") or "").strip()
+            for i in summary_incidents
+            if i.get("status")
+        ))
         critical_count = len([
             i for i in summary_incidents
             if i.get("severity") in ("CRITICAL", "HIGH")
@@ -3396,7 +3446,7 @@ async def api_command_briefing(response: Response, user=Depends(verify_firebase_
             },
         }
 
-    return await _cached_json(cache_key, 30, _compute)
+    return await _cached_json(cache_key, 60, _compute)
 
 
 # ---------------------------------------------------------------------------

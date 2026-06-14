@@ -97,13 +97,27 @@ async def cache_get(key: str) -> Any | None:
 
 
 async def cache_set(key: str, value: Any, ttl_seconds: int = 1800) -> None:
+    import asyncio as _asyncio
+
+    def _write_to_firestore() -> None:
+        """Blocking Firestore write, executed off the event-loop thread."""
+        cache_set_entry(key, value, ttl_seconds)
+
+    async def _background_firestore_write() -> None:
+        try:
+            loop = _asyncio.get_event_loop()
+            await loop.run_in_executor(None, _write_to_firestore)
+        except Exception as exc:
+            pass  # Non-critical: in-memory cache already populated
+
     if _cache_provider() == "redis":
         client = await _get_redis_client()
         if client is not None:
             try:
                 payload = json.dumps(value) if not isinstance(value, (str, bytes)) else value
                 await client.set(key, payload, ex=ttl_seconds if ttl_seconds > 0 else None)
-                cache_set_entry(key, value, ttl_seconds)
+                # Fire Firestore write in the background — don't block the response.
+                _asyncio.ensure_future(_background_firestore_write())
                 return
             except Exception:
                 pass
@@ -117,12 +131,15 @@ async def cache_set(key: str, value: Any, ttl_seconds: int = 1800) -> None:
             r = Redis(url=url, token=token)
             payload = json.dumps(value) if not isinstance(value, (str, bytes)) else value
             r.set(key, payload, ex=ttl_seconds)
-            cache_set_entry(key, value, ttl_seconds)
+            # Fire Firestore write in the background — don't block the response.
+            _asyncio.ensure_future(_background_firestore_write())
             return
         except Exception:
-            cache_set_entry(key, value, ttl_seconds)
+            # Both Redis paths failed — fall through to in-memory + Firestore.
             _memory_set(key, value, ttl_seconds)
+            _asyncio.ensure_future(_background_firestore_write())
             return
+    # Memory-only provider: write memory synchronously, Firestore asynchronously.
     cache_prune_expired()
-    cache_set_entry(key, value, ttl_seconds)
     _memory_set(key, value, ttl_seconds)
+    _asyncio.ensure_future(_background_firestore_write())
