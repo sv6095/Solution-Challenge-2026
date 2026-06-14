@@ -1,6 +1,8 @@
 import { useRef, useEffect, useMemo, useState } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plane, Clock, DollarSign, MapPin, Navigation, Clock3, Truck, UserRound } from "lucide-react";
+import { ArrowLeft, Plane, Clock, MapPin, Navigation, Clock3, Truck, UserRound } from "lucide-react";
+import { fmtINR } from "@/lib/currency";
+
 import { Map, MapRoute, MapControls, MapMarker, MarkerContent, MarkerTooltip, type MapRef } from "@/components/ui/map";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -337,7 +339,7 @@ function AirRouteViewer({ fromAP, toAP, incTitle, costUsd, mode, hubs }: { fromA
           {[
             {icon:<MapPin size={11}/>,  v:`${Math.round(distKm).toLocaleString()} km`, c:"#475569", bg:"#f8fafc", b:"#e2e8f0"},
             {icon:<Clock size={11}/>,   v:`${routes[0]?Math.round(routes[0].hours)+"h":"—"}`, c:"#475569", bg:"#f8fafc", b:"#e2e8f0"},
-            ...(costUsd>0?[{icon:<DollarSign size={11}/>,v:`$${costUsd.toLocaleString()}`,c:"#dc2626",bg:"#fef2f2",b:"#fecaca"}]:[]),
+            ...(costUsd>0?[{icon:<MapPin size={11}/>,v:fmtINR(costUsd),c:"#dc2626",bg:"#fef2f2",b:"#fecaca"}]:[]),
           ].map((p,i)=>(
             <span key={i} style={{display:"flex",alignItems:"center",gap:5,fontSize:11,fontFamily:"monospace",fontWeight:700,color:p.c,border:`1px solid ${p.b}`,background:p.bg,borderRadius:6,padding:"4px 9px"}}>{p.icon}{p.v}</span>
           ))}

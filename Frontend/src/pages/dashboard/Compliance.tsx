@@ -19,6 +19,8 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { api } from "@/lib/api";
+import { fmtINR } from "@/lib/currency";
+
 
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
@@ -275,7 +277,7 @@ const Compliance = () => {
                       <span className="text-xs font-mono font-bold text-slate-400 mt-1 block uppercase tracking-wide">
                         {Number(inc.affected_node_count || 0)} nodes ·
                         <span className="text-red-500 font-extrabold ml-1">
-                          ${Number(inc.total_exposure_usd || 0).toLocaleString()} VAL
+                          {fmtINR(Number(inc.total_exposure_usd || 0))} VAL
                         </span>
                       </span>
                     </div>
@@ -401,7 +403,7 @@ const Compliance = () => {
                           )}
                         </div>
                         <div className="flex items-center gap-6 text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest">
-                          <span className="text-red-500">${Number(rec.total_exposure_usd || 0).toLocaleString()} Exposure</span>
+                          <span className="text-red-500">{fmtINR(Number(rec.total_exposure_usd || 0))} Exposure</span>
                           <span className="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 rounded">
                             <Activity size={12} className="text-slate-500" />
                             {rec.actions_delivered}/{rec.actions_total} delivered

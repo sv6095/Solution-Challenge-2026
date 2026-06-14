@@ -95,7 +95,7 @@ def evaluate_checkpoint_triggers(incident: dict[str, Any]) -> list[str]:
     if severity in HIGH_RISK_SEVERITY:
         triggers.append(f"Severity={severity}: requires operator sign-off before autonomous execution")
     if exposure >= HIGH_RISK_EXPOSURE_USD:
-        triggers.append(f"Exposure=${exposure:,.0f} USD exceeds ${HIGH_RISK_EXPOSURE_USD:,.0f} threshold")
+        triggers.append(f"Exposure=₹{exposure * 83.5:,.0f} INR exceeds ₹{HIGH_RISK_EXPOSURE_USD * 83.5:,.0f} threshold")
     if 0 < confidence < HIGH_RISK_CONFIDENCE_LOW:
         triggers.append(f"GNN confidence={confidence:.0%} below {HIGH_RISK_CONFIDENCE_LOW:.0%} threshold")
     if has_sole_source:

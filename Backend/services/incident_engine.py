@@ -402,7 +402,7 @@ class IncidentEngine:
                 f"Due to {event.title} ({event.event_type}), our supply node "
                 f"'{top_node.name}' (Tier {top_node.tier}) is at risk.\n\n"
                 f"GNN Risk Score: {top_node.risk_score:.0%}\n"
-                f"Financial Exposure: ${top_node.exposure_usd:,.0f} USD\n"
+                f"Financial Exposure: ₹{top_node.exposure_usd * 83.5:,.0f} INR\n"
                 f"Days to Stockout: {top_node.days_to_stockout:.0f}\n\n"
                 f"We require emergency supply for the affected components. "
                 f"Please provide availability and pricing within 24 hours.\n\n"

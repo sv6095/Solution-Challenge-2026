@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Globe from "react-globe.gl";
 import type { ArAssetDisruption, ArAssetNode, ArAssetRoute } from "@/lib/api";
+import { fmtINR } from "@/lib/currency";
+
 
 const MODE_COLORS: Record<string, string> = {
   sea: "#2563eb",
@@ -15,12 +17,8 @@ const modeLabel = (mode: string) => {
   return "Land";
 };
 
-const fmtMoney = (value: number) =>
-  new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(value) ? value : 0);
+const fmtMoney = fmtINR;
+
 
 const fmtDelta = (value: number, unit = "") => {
   const n = Number.isFinite(value) ? value : 0;

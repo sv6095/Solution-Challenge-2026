@@ -26,6 +26,7 @@ import {
   demoWorkflowState,
 } from "@/pages/dashboard/demo/scenario-data";
 import { runDemoMonteCarlo } from "@/pages/dashboard/demo/monte-carlo";
+import { fmtINR } from "@/lib/currency";
 
 const severityTone = (score: number) => {
   if (score >= 80) return "text-red-300 bg-red-500/10 border-red-500/30";
@@ -65,7 +66,7 @@ const DemoScenario = () => {
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-slate-400">Exposure</div>
-                <div className="mt-2 text-2xl font-semibold text-white">${(demoAssessment.exposure_usd / 1_000_000).toFixed(1)}M</div>
+                <div className="mt-2 text-2xl font-semibold text-white">{fmtINR(demoAssessment.exposure_usd)}</div>
                 <div className="mt-1 text-sm text-slate-300">{demoAssessment.days_at_risk} days to first stockout</div>
               </div>
               <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -107,7 +108,7 @@ const DemoScenario = () => {
               </div>
               <div className="rounded-2xl border border-fuchsia-500/20 bg-fuchsia-500/10 p-4">
                 <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-fuchsia-200">Exposure avoided</div>
-                <div className="mt-2 text-3xl font-semibold text-white">${(simulation.expectedExposureAvoidedUsd / 1_000_000).toFixed(2)}M</div>
+                <div className="mt-2 text-3xl font-semibold text-white">{fmtINR(simulation.expectedExposureAvoidedUsd)}</div>
               </div>
             </div>
 
@@ -118,7 +119,7 @@ const DemoScenario = () => {
               </div>
               <p className="mt-2 text-sm leading-6 text-slate-300">
                 Based on {simulation.runs} simulated disruptions, the preferred action is <span className="font-semibold text-white">{simulation.recommendation}</span>.
-                Worst modeled downside for a missed response is ${(simulation.worstCaseLossUsd / 1_000_000).toFixed(2)}M.
+                Worst modeled downside for a missed response is {fmtINR(simulation.worstCaseLossUsd)}.
               </p>
             </div>
 
@@ -126,8 +127,8 @@ const DemoScenario = () => {
               <div className="text-[11px] font-mono uppercase tracking-[0.18em] text-amber-200">Reality-check probe node</div>
               <div className="mt-2 text-lg font-semibold text-white">{simulation.probeNode.name}</div>
               <p className="mt-2 text-sm leading-6 text-slate-200">
-                Exposure score {simulation.probeNode.exposureScore} · daily throughput ${(simulation.probeNode.dailyThroughputUsd / 1_000).toFixed(0)}k ·
-                stockout window {simulation.probeNode.stockoutDays.toFixed(1)} days · modeled worst-case risk ${(simulation.probeNode.riskUsd / 1_000_000).toFixed(2)}M.
+                Exposure score {simulation.probeNode.exposureScore} · daily throughput {fmtINR(simulation.probeNode.dailyThroughputUsd)} ·
+                stockout window {simulation.probeNode.stockoutDays.toFixed(1)} days · modeled worst-case risk {fmtINR(simulation.probeNode.riskUsd)}.
               </p>
             </div>
           </div>
@@ -276,7 +277,7 @@ const DemoScenario = () => {
                     </div>
                   </div>
                   <div className="mt-2 text-sm leading-6 text-slate-400">
-                    Engine: {route.engine ?? "n/a"} · Distance: {route.distance_km.toLocaleString()} km · Cost: ${route.cost_usd.toLocaleString()}
+                    Engine: {route.engine ?? "n/a"} · Distance: {route.distance_km.toLocaleString()} km · Cost: {fmtINR(route.cost_usd)}
                   </div>
                   <div className="mt-2 text-sm text-slate-300">
                     {route.mode === "sea" && `Transit time ${route.transit_days} days misses the stockout window.`}
@@ -332,7 +333,7 @@ const DemoScenario = () => {
               <div>
                 <div className="text-lg font-semibold text-white">Typhoon Yagi · Critical incident</div>
                 <div className="mt-1 text-sm text-slate-300">
-                  3 suppliers affected · ${(demoAssessment.exposure_usd / 1_000_000).toFixed(1)}M exposure · {demoAssessment.days_at_risk} days to stockout
+                  3 suppliers affected · {fmtINR(demoAssessment.exposure_usd)} exposure · {demoAssessment.days_at_risk} days to stockout
                 </div>
               </div>
               <span className="rounded-full border border-red-500/30 bg-red-500/10 px-3 py-1 text-[11px] font-mono uppercase tracking-[0.18em] text-red-200">

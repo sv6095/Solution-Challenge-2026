@@ -38,6 +38,7 @@ import {
   type GdeltEvent,
 } from "@/lib/api";
 import type MapLibreGL from "maplibre-gl";
+import { fmtINR } from "@/lib/currency";
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 const CC: Record<string, [number, number]> = {
@@ -1301,7 +1302,7 @@ function PolymarketPrediction() {
           <div style={{ flex:1 }}>
             <div style={{ fontSize:14, fontWeight:600, color:"var(--text)" }}>Will Mojtaba Khamenei be head of state in Iran end of 2026?</div>
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"var(--text-dim)", marginTop:4 }}>
-              <span>Vol: $6.9M</span>
+              <span>Vol: ₹57.6 Cr</span>
               <span>Closes: 31 Dec 2026</span>
             </div>
           </div>
@@ -1338,7 +1339,7 @@ function MarketWatchlist() {
                </svg>
             </div>
             <div style={{ textAlign:"right" }}>
-              <div style={{ fontSize:14, fontWeight:700, color:"var(--text)" }}>${m.price?.toLocaleString()}</div>
+              <div style={{ fontSize:14, fontWeight:700, color:"var(--text)" }}>{fmtINR(m.price || 0)}</div>
               <div style={{ fontSize:12, fontWeight:600, color: isUp ? "#10b981" : "#ef4444" }}>{isUp ? '+' : ''}{Number(m.change_pct || m.change).toFixed(2)}%</div>
             </div>
           </div>
@@ -1697,7 +1698,7 @@ function MetalsAndMaterialsPanel() {
         ) : (
           <div style={{ fontSize:12, color:"var(--text-dim)", textAlign:"center", padding:"10px 0" }}>
             Live EUR FX data stream active. <br/>
-            <span style={{ fontSize:14, fontWeight:700, color:"var(--text)" }}>1.0854 EUR/USD</span>
+            <span style={{ fontSize:14, fontWeight:700, color:"var(--text)" }}>90.63 EUR/INR</span>
           </div>
         )}
       </div>

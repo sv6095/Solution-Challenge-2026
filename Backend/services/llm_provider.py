@@ -21,15 +21,28 @@ def _prefer() -> ProviderName:
 def _gemini_api_key() -> str:
     return (os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or "").strip()
 
+# Language enforcement prefix prepended to every system prompt.
+# This guarantees all LLM-generated incident text (titles, descriptions,
+# recommendations, RFQ bodies) is always returned in English, even when
+# the raw input signal (GDACS, ACLED, ReliefWeb, etc.) contains non-English text.
+_ENGLISH_SYSTEM_PREFIX = (
+    "IMPORTANT: You MUST always respond in English only. "
+    "If any input text is in a language other than English, translate it to English in your response. "
+    "Never output text in any language other than English.\n\n"
+)
+
 
 async def _gemini_complete(prompt: str, system: str, max_tokens: int) -> str:
     api_key = _gemini_api_key()
     if not api_key:
         raise RuntimeError("Missing GEMINI_API_KEY or GOOGLE_API_KEY")
 
+    # Enforce English output on every Gemini call.
+    effective_system = _ENGLISH_SYSTEM_PREFIX + system if system else _ENGLISH_SYSTEM_PREFIX.strip()
+
     parts: list[dict[str, Any]] = [{"text": prompt}]
-    if system:
-        parts.insert(0, {"text": f"System:\n{system}\n\nUser task below."})
+    if effective_system:
+        parts.insert(0, {"text": f"System:\n{effective_system}\n\nUser task below."})
 
     url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
     payload: dict[str, Any] = {
@@ -62,8 +75,10 @@ async def _groq_complete(prompt: str, system: str, max_tokens: int) -> str:
     model = (os.getenv("GROQ_MODEL") or "llama-3.3-70b-versatile").strip()
     url = "https://api.groq.com/openai/v1/chat/completions"
     messages: list[dict[str, str]] = []
-    if system:
-        messages.append({"role": "system", "content": system})
+    # Enforce English output on every Groq call.
+    effective_system = _ENGLISH_SYSTEM_PREFIX + system if system else _ENGLISH_SYSTEM_PREFIX.strip()
+    if effective_system:
+        messages.append({"role": "system", "content": effective_system})
     messages.append({"role": "user", "content": prompt})
     payload: dict[str, Any] = {
         "model": model,

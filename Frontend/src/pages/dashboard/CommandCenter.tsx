@@ -12,6 +12,8 @@ import {
   RefreshCw, Target, Shield, Network,
   TrendingUp, AlertTriangle, Eye,
 } from "lucide-react";
+import { fmtINR } from "@/lib/currency";
+
 
 /* ── tiny sparkline (pure SVG) ── */
 function Sparkline({ data, color }: { data: number[]; color: string }) {
@@ -264,7 +266,7 @@ const CommandCenter = () => {
                           </span>
                         </div>
                         <p className="font-semibold text-sm leading-tight truncate">{inc.event_title}</p>
-                        <p className="text-xs text-muted-foreground">Exposure: <span className="font-semibold text-foreground">${(inc.total_exposure_usd || 0).toLocaleString()}</span></p>
+                        <p className="text-xs text-muted-foreground">Exposure: <span className="font-semibold text-foreground">{fmtINR(inc.total_exposure_usd || 0)}</span></p>
                         <Button size="sm" onClick={() => setSelectedId(String(inc.id))} className="w-full h-7 text-xs">View Details</Button>
                       </div>
                     </MarkerPopup>
@@ -311,7 +313,7 @@ const CommandCenter = () => {
               </div>
               <div>
                 <p className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Financial Exposure</p>
-                <p className="text-lg font-headline font-bold text-sentinel-red">${(selectedIncident.total_exposure_usd || 0).toLocaleString()}</p>
+                <p className="text-lg font-headline font-bold text-sentinel-red">{fmtINR(selectedIncident.total_exposure_usd || 0)}</p>
               </div>
               <div>
                 <p className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Praecantator Confidence Score</p>
@@ -406,7 +408,7 @@ const CommandCenter = () => {
                       </td>
                       <td className="px-4 py-3 font-medium truncate max-w-[300px]">{inc.event_title || "Unknown"}</td>
                       <td className="px-4 py-3 tabular-nums">{inc.affected_node_count || 1}</td>
-                      <td className="px-4 py-3 font-semibold tabular-nums">${(inc.total_exposure_usd || 0).toLocaleString()}</td>
+                      <td className="px-4 py-3 font-semibold tabular-nums">{fmtINR(inc.total_exposure_usd || 0)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{inc.min_stockout_days ? `${inc.min_stockout_days}d` : "—"}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">

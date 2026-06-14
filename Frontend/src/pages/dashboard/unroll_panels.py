@@ -198,7 +198,7 @@ if idx_start != -1 and idx_end != -1:
                   </div>
                   <div style={{ fontSize:12, color:"var(--text-dim)", lineHeight:1.4, marginBottom:6 }}>{inc.reasoning}</div>
                   <div style={{ display:"flex", gap:10, fontSize:11, fontWeight:600 }}>
-                    <span style={{ color:"var(--threat-critical)" }}>EXPOSURE: ${(inc.total_exposure_usd/1e6).toFixed(1)}M</span>
+                    <span style={{ color:"var(--threat-critical)" }}>EXPOSURE: {fmtINR(inc.total_exposure_usd || 0)}</span>
                     <span style={{ color:"var(--text-muted)" }}>AFFECTED NODES: {inc.affected_nodes?.length ?? 0}</span>
                   </div>
                 </div>

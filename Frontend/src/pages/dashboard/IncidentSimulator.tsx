@@ -6,7 +6,7 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
-  DollarSign,
+  IndianRupee,
   ExternalLink,
   Plane,
   Send,
@@ -20,6 +20,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { api } from "@/lib/api";
 import { filterFreshIncidents } from "@/lib/incident-freshness";
 import { ReasoningPanel } from "@/components/workflow/ReasoningPanel";
+import { fmtINR } from "@/lib/currency";
 
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
@@ -137,7 +138,7 @@ const IncidentSimulator = () => {
     refetchInterval: 15_000,
   });
 
-  const simulations = filterFreshIncidents(simulationsRaw as Record<string, unknown>[]);
+  const simulations = filterFreshIncidents(simulationsRaw as unknown as Record<string, unknown>[]);
 
   const { data: detail } = useQuery<SimulationIncident>({
     queryKey: ["simulation-incident", selectedId],
@@ -225,7 +226,7 @@ const IncidentSimulator = () => {
                 </div>
                 <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-400 pl-[26px]">
                   <span>{Number(incident.affected_node_count || 0)} nodes</span>
-                  <span>${Number(incident.total_exposure_usd || 0).toLocaleString()}</span>
+                  <span>{fmtINR(Number(incident.total_exposure_usd || 0))}</span>
                   <span>Praecantator {(Number(incident.gnn_confidence || 0) * 100).toFixed(0)}%</span>
                 </div>
               </div>
@@ -296,8 +297,8 @@ const IncidentSimulator = () => {
               {[
                 {
                   label: "Exposure",
-                  value: `$${Number(detail.total_exposure_usd || 0).toLocaleString()}`,
-                  icon: DollarSign,
+                  value: fmtINR(Number(detail.total_exposure_usd || 0)),
+                  icon: IndianRupee,
                   color: "text-red-500",
                 },
 
@@ -385,7 +386,7 @@ const IncidentSimulator = () => {
                           {(score * 100).toFixed(0)}%
                         </div>
                         <div className="text-xs font-mono font-bold text-slate-500 mt-1">
-                          ${Number(node.exposure_usd || 0).toLocaleString()}
+                          {fmtINR(Number(node.exposure_usd || 0))}
                         </div>
                       </div>
                     </div>
@@ -452,7 +453,7 @@ const IncidentSimulator = () => {
                         )}
                         {Number(route.cost_usd || 0) > 0 && (
                           <div className="text-xs font-mono font-bold text-slate-500 flex items-center gap-1.5 justify-end">
-                            <DollarSign size={12} className="text-slate-400" /> ${Number(route.cost_usd || 0).toLocaleString()}
+                            <IndianRupee size={12} className="text-slate-400" /> {fmtINR(Number(route.cost_usd || 0))}
                           </div>
                         )}
                       </div>
@@ -531,7 +532,7 @@ const IncidentSimulator = () => {
                 <div className="border border-slate-200 bg-white p-4 rounded shadow-sm">
                   <div className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest">Loss Avoided</div>
                   <div className="text-xl font-bold font-headline text-orange-600 mt-2">
-                    ${Number(monteCarlo.estimated_loss_avoided_usd || 0).toLocaleString()}
+                    {fmtINR(Number(monteCarlo.estimated_loss_avoided_usd || 0))}
                   </div>
                 </div>
                 <div className="border border-slate-200 bg-white p-4 rounded shadow-sm">
@@ -545,7 +546,7 @@ const IncidentSimulator = () => {
                 <div className="border border-slate-200 bg-white p-4 rounded shadow-sm">
                   <div className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest">Worst Case</div>
                   <div className="text-lg font-bold font-headline text-red-600 mt-2">
-                    ${Number(monteCarlo.worst_case_loss_usd || 0).toLocaleString()}
+                    {fmtINR(Number(monteCarlo.worst_case_loss_usd || 0))}
                   </div>
                 </div>
                 <div className="border border-slate-200 bg-white p-4 rounded shadow-sm">

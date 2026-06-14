@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Loader2, MapPin } from "lucide-react";
+import { fmtINR } from "@/lib/currency";
 
 import { Button } from "@/components/ui/button";
 import type { ArAssetDisruption, ArAssetNode, ArAssetRoute } from "@/lib/api";
+
 
 declare global {
   interface Window {
@@ -18,19 +20,31 @@ function loadGoogleMaps(apiKey: string): Promise<any> {
   if (window.__praecantatorGoogleMapsPromise) return window.__praecantatorGoogleMapsPromise;
 
   window.__praecantatorGoogleMapsPromise = new Promise((resolve, reject) => {
+    // Use the recommended `loading=async` pattern per Google Maps JS API best practices.
+    // A unique callback name is registered on window so the API signals readiness.
+    const callbackName = "__praecantatorGoogleMapsCallback";
+    (window as any)[callbackName] = () => resolve(window.google?.maps);
+
     const existing = document.querySelector<HTMLScriptElement>("script[data-praecantator-google-maps]");
     if (existing) {
-      existing.addEventListener("load", () => resolve(window.google?.maps));
+      // Script already injected — wait for callback or error.
       existing.addEventListener("error", () => reject(new Error("Failed to load Google Maps JavaScript API.")));
       return;
     }
 
     const script = document.createElement("script");
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`;
+    // `loading=async` is the recommended best-practice flag (suppresses the console warning).
+    // `language=en` ensures all map UI text (labels, controls) is rendered in English.
+    script.src = [
+      `https://maps.googleapis.com/maps/api/js`,
+      `?key=${encodeURIComponent(apiKey)}`,
+      `&v=weekly`,
+      `&loading=async`,
+      `&language=en`,
+      `&callback=${callbackName}`,
+    ].join("");
     script.async = true;
-    script.defer = true;
     script.dataset.praecantatorGoogleMaps = "true";
-    script.onload = () => resolve(window.google?.maps);
     script.onerror = () => reject(new Error("Failed to load Google Maps JavaScript API."));
     document.head.appendChild(script);
   });
@@ -38,12 +52,7 @@ function loadGoogleMaps(apiKey: string): Promise<any> {
   return window.__praecantatorGoogleMapsPromise;
 }
 
-const fmtMoney = (value?: number) =>
-  new Intl.NumberFormat(undefined, {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 0,
-  }).format(Number.isFinite(Number(value)) ? Number(value) : 0);
+const fmtMoney = fmtINR;
 
 const riskColor = (score?: number, criticality?: string) => {
   const value = Number(score ?? 50);

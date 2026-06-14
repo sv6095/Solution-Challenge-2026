@@ -12,6 +12,7 @@ import {
   PageNumber, NumberFormat, UnderlineType,
 } from "docx";
 import { saveAs } from "file-saver";
+import { fmtINR } from "@/lib/currency";
 
 // ─── Palette helpers ──────────────────────────────────────────────────────────
 const RED    = "C0392B";
@@ -226,7 +227,7 @@ export async function generateAuditReport(
         ["Warning Risks",               String(warning)],
         ["Safe / Monitored",            String(safe)],
         ["Network Health",              `${healthPct}%`],
-        ["Total Financial Exposure",    `$${totalExposure.toLocaleString()} USD`],
+        ["Total Financial Exposure",    fmtINR(totalExposure)],
         ["Average Confidence Score",    `${avgConf}%`],
         ["Report Timestamp",            dateStr],
       ]
@@ -234,7 +235,7 @@ export async function generateAuditReport(
     new Paragraph({ spacing: { before: 200 }, children: [new TextRun({ text: "" })] }),
     h3("Top 3 Priority Risks Requiring Immediate Action"),
     ...top3.map((inc, i) =>
-      bullet(`${i + 1}. [${inc.severity}] ${inc.event_title || "Unknown"} — $${Number(inc.total_exposure_usd || 0).toLocaleString()} exposure`)
+      bullet(`${i + 1}. [${inc.severity}] ${inc.event_title || "Unknown"} — ${fmtINR(Number(inc.total_exposure_usd || 0))} exposure`)
     ),
     h3("Strategic Actions Recommended"),
     bullet("Activate backup supplier protocols for all CRITICAL-tier incidents."),
@@ -301,13 +302,13 @@ export async function generateAuditReport(
       // 5: Financial Impact
       h2("5. Financial Impact Analysis"),
       dataTable(
-        ["Financial Metric", "Value (USD)"],
+        ["Financial Metric", "Value (INR)"],
         [
-          ["Direct Financial Exposure",   `$${expo}`],
-          ["Indirect Loss Estimate",       `$${Math.round(Number(inc.total_exposure_usd || 0) * 0.25).toLocaleString()} (est.)`],
-          ["Revenue at Risk",              `$${Math.round(Number(inc.total_exposure_usd || 0) * 0.6).toLocaleString()} (est.)`],
-          ["Cost of Inaction",             `$${Math.round(Number(inc.total_exposure_usd || 0) * 1.3).toLocaleString()} (est.)`],
-          ["Estimated Mitigation Cost",    `$${Math.round(Number(inc.total_exposure_usd || 0) * 0.15).toLocaleString()} (est.)`],
+          ["Direct Financial Exposure",   fmtINR(Number(inc.total_exposure_usd || 0))],
+          ["Indirect Loss Estimate",       `${fmtINR(Number(inc.total_exposure_usd || 0) * 0.25)} (est.)`],
+          ["Revenue at Risk",              `${fmtINR(Number(inc.total_exposure_usd || 0) * 0.6)} (est.)`],
+          ["Cost of Inaction",             `${fmtINR(Number(inc.total_exposure_usd || 0) * 1.3)} (est.)`],
+          ["Estimated Mitigation Cost",    `${fmtINR(Number(inc.total_exposure_usd || 0) * 0.15)} (est.)`],
           ["Stockout Horizon",             inc.min_stockout_days ? `${inc.min_stockout_days} days` : "—"],
         ]
       ),
@@ -425,7 +426,7 @@ export async function generateAuditReport(
   // ── Section 15: Conclusion ──────────────────────────────────────────────────
   const sec15: any[] = [
     h1("15. Conclusion & Strategic Insight"),
-    body(`This audit covers ${total} risk events with a combined financial exposure of $${totalExposure.toLocaleString()} USD. Network health stands at ${healthPct}%.`),
+    body(`This audit covers ${total} risk events with a combined financial exposure of ${fmtINR(totalExposure)}. Network health stands at ${healthPct}%.`),
     new Paragraph({ spacing: { before: 100 }, children: [new TextRun({ text: "" })] }),
     h3("What This Report Reveals"),
     bullet("Supplier concentration in high-risk geographies remains the primary systemic vulnerability."),
@@ -460,7 +461,7 @@ export async function generateAuditReport(
     kv("CRITICAL",              "Immediate action required. Exposure threshold exceeded."),
     kv("WARNING",               "Elevated risk. Monitoring escalated. Action within 24h."),
     kv("Confidence Score",      "Statistical confidence in risk classification (0–100%)."),
-    kv("Exposure (USD)",        "Estimated direct financial value at risk from the incident."),
+    kv("Exposure (INR)",        "Estimated direct financial value at risk from the incident."),
     kv("Cascade Risk Score",    "Probability that the incident propagates to adjacent supply nodes."),
     kv("OODA Pipeline",         "Observe-Orient-Decide-Act — the autonomous response cycle."),
     kv("SLA",                   "Service Level Agreement — the contractual response time threshold."),

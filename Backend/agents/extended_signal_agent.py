@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import hashlib
 from datetime import datetime, timezone
 from typing import Any
@@ -65,6 +66,13 @@ def _parse_float(value: Any, fallback: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _strip_html(text: str) -> str:
+    """Remove HTML tags and decode basic HTML entities."""
+    clean = re.sub(r"<[^>]+>", " ", text or "")
+    clean = clean.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&nbsp;", " ")
+    return " ".join(clean.split())  # collapse whitespace
 
 
 def _wto_country_label(code: str) -> str:
@@ -173,7 +181,11 @@ async def fetch_gdacs() -> list[dict]:
         severity = {"red": 8.5, "orange": 6.0, "green": 3.0}.get(alert, 4.0)
         url_field = props.get("url") or {}
         url = url_field.get("report", "") if isinstance(url_field, dict) else str(url_field)
-        title = str(props.get("htmldescription") or props.get("eventname") or "GDACS Event")
+        # Prefer eventname (GDACS always provides this in English).
+        # htmldescription can contain HTML and non-English text — strip tags as fallback only.
+        raw_html_desc = str(props.get("htmldescription") or "")
+        eventname = str(props.get("eventname") or "").strip()
+        title = eventname or _strip_html(raw_html_desc) or "GDACS Event"
         from services.event_freshness import extract_event_timestamp
 
         event_ts = extract_event_timestamp({"title": title, "timestamp": props.get("fromdate") or props.get("startdate")})

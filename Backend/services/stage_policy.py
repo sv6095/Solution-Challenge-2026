@@ -200,7 +200,7 @@ async def _fallback_rfq_template(
         "body": (
             f"Dear {name} team,\n\n"
             f"We are reaching out urgently due to '{event_title}' disrupting our supply chain.\n"
-            f"Financial exposure at risk: ${total_exposure:,.0f} USD.\n\n"
+            f"Financial exposure at risk: ₹{total_exposure * 94.5:,.0f} INR.\n\n"
             f"Please confirm your current capacity and earliest available ship date.\n"
             f"Incoterm: DAP. Payment: Net 30.\n\n"
             f"Regards,\n{company_name} Procurement"

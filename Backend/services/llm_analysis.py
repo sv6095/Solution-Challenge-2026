@@ -50,9 +50,13 @@ def _local_analysis(event: dict, suppliers: list[dict], assessment: dict | None 
         "- Secondary effects: inventory buffer drawdown, overtime production, and higher variance in delivery promises."
     )
     if exposure_usd is not None or days_at_risk is not None:
+        try:
+            inr_str = f"₹{float(exposure_usd) * 83.5:,.0f} INR"
+        except Exception:
+            inr_str = f"₹{exposure_usd} INR"
         lines.append(
             "### Quantified Impact (model-backed)\n"
-            f"- Estimated exposure: **${exposure_usd} USD**\n"
+            f"- Estimated exposure: **{inr_str}**\n"
             f"- Days at risk: **{days_at_risk} days**\n"
             f"- Confidence: **{confidence}**\n"
             "Interpretation: exposure is a planning number for mitigation (reroute + alternate supplier activation), not a bookable invoice."
@@ -141,10 +145,16 @@ async def generate_appendix_nlp(report: dict) -> str:
 
     summary = report.get("summary", {})
     act = report.get("act", {})
+    raw_exposure = summary.get('exposure_usd')
+    try:
+        inr_exposure = f"₹{float(raw_exposure) * 83.5:,.0f} INR" if raw_exposure is not None else "Unknown"
+    except Exception:
+        inr_exposure = f"₹{raw_exposure} INR"
+
     return (
         f"This execution record details a critical supply chain disruption managed by the Praecantator Kinetic Fortress module. "
         f"The platform registered a severe routing interruption triggering a fully coordinated reassessment protocol. "
-        f"Initial telemetry projected a maximum operational financial exposure of {summary.get('exposure_usd', 'Unknown')} USD, "
+        f"Initial telemetry projected a maximum operational financial exposure of {inr_exposure}, "
         f"forcing immediate intervention.\n\n"
         f"Following the automated risk-modeling sequence, the operator executed emergency contingency '{str(summary.get('action_taken', 'N/A')).upper()}'. "
         f"The workflow achieved end-to-end resolution in {summary.get('response_time_seconds', 'N/A')} seconds. "

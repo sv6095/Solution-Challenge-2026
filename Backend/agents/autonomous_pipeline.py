@@ -948,7 +948,7 @@ async def _process_single_event(
                 incident_id, "assessment_agent", "exposure_calculation",
                 f"INDIVIDUAL NODE FINANCIAL TRAJECTORY: Advanced node-level diagnostics successfully executed against '{node.name}'. "
                 f"Our quantitative models have ingested current inventory levels, outstanding purchase orders, and historical average daily throughput to output a highly specific disruption profile. "
-                f"The node registered a severe network risk coefficient of {node.risk_score:.3f}, correlating aggressively with a projected hard financial exposure totaling exactly ${node.exposure_usd:,.2f} USD. "
+                f"The node registered a severe network risk coefficient of {node.risk_score:.3f}, correlating aggressively with a projected hard financial exposure totaling exactly ₹{node.exposure_usd * 83.5:,.2f} INR. "
                 f"Factoring in recorded safety stock buffers and anticipated supply chain lead times, manufacturing continuity will mathematically fail, projecting an unavoidable hard stockout event arriving precisely in {node.days_to_stockout:.1f} days unless urgently mitigated. "
                 f"The specific vulnerability vectors impacting this site definitively include: {detail}. "
                 f"This singular operational analysis is now systematically queued for immediate aggregation into the overarching systemic portfolio impact ledger.",
@@ -968,7 +968,7 @@ async def _process_single_event(
         log_reasoning_step(
             incident_id, "assessment_agent", "total_exposure",
             f"SYSTEMIC PORTFOLIO AGGREGATION: The discrete node-level financial and operational calculations have been successfully synchronized into a unified systemic risk profile. "
-            f"Across all globally identified geographical vulnerabilities, the total projected supply chain financial exposure currently sums to a massive ${total_exposure:,.2f} USD if this disruption continues entirely unmitigated. "
+            f"Across all globally identified geographical vulnerabilities, the total projected supply chain financial exposure currently sums to a massive ₹{total_exposure * 83.5:,.2f} INR if this disruption continues entirely unmitigated. "
             f"Our predictive scheduling algorithms additionally indicate that the most critical component exhaustion will trigger a systemic manufacturing halt in exactly {min_stockout:.1f} days across the broader assembly network. "
             f"Consequently, taking into account the simultaneous compounding impact across {len(affected_nodes_data)} distinct supplier vulnerabilities and evaluating the absolute financial magnitude, our heuristic engine has officially designated this entire incident class as '{severity_label}'. "
             f"This critical status code immediately authorizes the autonomous orchestration of secondary sourcing and advanced multi-modal logistics rerouting.",
@@ -1016,7 +1016,7 @@ async def _process_single_event(
                 f"LOGISTICS FEASIBILITY AND COST ANALYSIS: The network autonomously analyzed the viability of {route['mode'].upper()} utilization as a strategic geographical bypass option. "
                 f"By probing global transit hubs and identifying remaining operational corridors unaffected by the primary hazard zone, the engine identified a viable tactical pathway described as: {route['description']}. "
                 f"The projected door-to-door transit time for this logistical maneuver is strictly calculated at {route['transit_days']} days, factoring in historical dwell times and anticipated regional congestion. "
-                f"Furthermore, utilizing real-time API integrations and spot-market indices, the financial burden of this alternative lift is projected at precisely ${route['cost_usd']:,.2f} per metric tonne. "
+                f"Furthermore, utilizing real-time API integrations and spot-market indices, the financial burden of this alternative lift is projected at precisely ₹{route['cost_usd'] * 83.5:,.2f} per metric tonne. "
                 f"Given our rigid time-to-survival mandates and aggressive financial parameters, this particular tactical modality is definitively marked as '{'★ HIGHLY RECOMMENDED' if route['recommended'] else route['status_label']}'.",
                 "success",
                 {"mode": route["mode"], "days": route["transit_days"], "recommended": route["recommended"]},
@@ -1087,7 +1087,7 @@ async def _process_single_event(
 
         recommendation_detail = (
             f"{best_route['mode'].upper()}: {best_route['description']} · "
-            f"{best_route['transit_days']} days · ${best_route['cost_usd']:,.0f}/tonne\n"
+            f"{best_route['transit_days']} days · ₹{best_route['cost_usd'] * 83.5:,.0f}/tonne\n"
         )
         if min_stockout > 0:
             recommendation_detail += f"Covers {min_stockout:.0f}-day stockout window\n"
@@ -1543,7 +1543,7 @@ async def _generate_rfq_draft(
     # Build affected summary for LLM
     affected_summary = "\n".join(
         f"  - {n.get('name', 'Supplier')}: risk={n.get('risk_score', 0):.0%}, "
-        f"exposure=${n.get('exposure_usd', 0):,.0f}, "
+        f"exposure=₹{n.get('exposure_usd', 0) * 83.5:,.0f}, "
         f"{'stockout in ' + str(n.get('days_to_stockout', 0)) + ' days' if n.get('days_to_stockout', 0) > 0 else 'indirect risk'}"
         for n in affected_nodes[:5]
     )
@@ -1557,7 +1557,7 @@ async def _generate_rfq_draft(
             f"Context:\n"
             f"- Disruption: {event_title}\n"
             f"- Affected suppliers:\n{affected_summary}\n"
-            f"- Total exposure: ${total_exposure:,.0f} USD\n"
+            f"- Total exposure: ₹{total_exposure * 83.5:,.0f} INR\n"
             f"- Min stockout: {min_stockout:.0f} days\n"
             f"- Backup supplier: {backup_supplier.get('name', 'N/A') if backup_supplier else 'N/A'}\n"
             f"- Preferred route: {best_route.get('mode', 'air')} freight · {best_route.get('transit_days', 2)} days\n"
@@ -1595,7 +1595,7 @@ async def _generate_rfq_draft(
                 f"Due to '{event_title}' disrupting our supply chain, "
                 f"we require emergency sourcing to prevent production stoppage.\n\n"
                 f"Affected suppliers: {len(affected_nodes)}\n"
-                f"Total exposure: ${total_exposure:,.0f} USD\n"
+                f"Total exposure: ₹{total_exposure * 83.5:,.0f} INR\n"
                 f"Urgency: stockout in {min_stockout:.0f} days\n"
                 f"Preferred: {best_route.get('mode', 'air')} freight\n"
                 f"Incoterm: DAP\n\n"

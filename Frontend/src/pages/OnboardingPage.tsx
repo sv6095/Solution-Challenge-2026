@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, Settings, ChevronLeft, Upload, Plus, X } from "lucide-react";
-import { toast } from "@/components/ui/sonner";
 import { api, getUserId } from "@/lib/api";
 import { useSearchParams } from "react-router-dom";
+import { fmtINRRaw } from "@/lib/currency";
+import { toast } from "@/components/ui/sonner";
 
 const steps = ["Company Profile", "Logistics Nodes", "Supplier Relationships"];
 
@@ -137,7 +138,7 @@ const OnboardingPage = (props: Props) => {
               modes: (n.transport_modes ?? n.modes ?? { sea: true, air: true, land: true }) as LogisticsNode["modes"],
               lat: typeof n.lat === "number" ? n.lat : undefined,
               lng: typeof n.lng === "number" ? n.lng : undefined,
-              dailyThroughputUsd: String(n.daily_throughput_usd ?? ""),
+              dailyThroughputUsd: String(n.daily_throughput_usd ? Math.round(Number(n.daily_throughput_usd) * 83.5) : ""),
               safetyStockDays: String(n.safety_stock_days ?? ""),
               criticalThresholdPct: String(n.critical_threshold_pct ?? "60"),
             })),
@@ -365,7 +366,7 @@ const OnboardingPage = (props: Props) => {
           lat: n.lat,
           lng: n.lng,
           transport_modes: n.modes,
-          daily_throughput_usd: n.dailyThroughputUsd,
+          daily_throughput_usd: n.dailyThroughputUsd ? Number(n.dailyThroughputUsd) / 83.5 : 0,
           safety_stock_days: n.safetyStockDays,
           critical_threshold_pct: n.criticalThresholdPct,
         })),
@@ -593,7 +594,7 @@ const OnboardingPage = (props: Props) => {
                   <option>Tier 2</option>
                   <option>Tier 3</option>
                 </select>
-                <input placeholder="Daily throughput (USD)" value={newNode.dailyThroughputUsd} onChange={(e) => setNewNode({ ...newNode, dailyThroughputUsd: e.target.value })} className="input-sentinel px-3 py-2 rounded-sm" type="number" />
+                <input placeholder="Daily throughput (INR)" value={newNode.dailyThroughputUsd} onChange={(e) => setNewNode({ ...newNode, dailyThroughputUsd: e.target.value })} className="input-sentinel px-3 py-2 rounded-sm" type="number" />
                 <input placeholder="Safety stock (days)" value={newNode.safetyStockDays} onChange={(e) => setNewNode({ ...newNode, safetyStockDays: e.target.value })} className="input-sentinel px-3 py-2 rounded-sm" type="number" />
                 <input placeholder="Critical threshold (%)" value={newNode.criticalThresholdPct} onChange={(e) => setNewNode({ ...newNode, criticalThresholdPct: e.target.value })} className="input-sentinel px-3 py-2 rounded-sm" type="number" />
               </div>
@@ -627,7 +628,7 @@ const OnboardingPage = (props: Props) => {
                         <span className="text-[10px] font-headline font-medium text-slate-500 mt-1 leading-relaxed">
                           {n.tier} · {n.address} {n.lat && n.lng ? `(${n.lat.toFixed(4)}, ${n.lng.toFixed(4)})` : "(No Coords)"}
                           {n.dunsNumber && ` · DUNS: ${n.dunsNumber}`}
-                          {n.dailyThroughputUsd && ` · $${Number(n.dailyThroughputUsd).toLocaleString()}/day`}
+                          {n.dailyThroughputUsd && ` · ${fmtINRRaw(Number(n.dailyThroughputUsd))}/day`}
                           {n.safetyStockDays && ` · ${n.safetyStockDays}d safety stock`}
                           {` · Threshold: ${n.criticalThresholdPct}%`}
                           {` · Modes: ${Object.entries(n.modes).filter(([,v]) => v).map(([k]) => k).join(", ")}`}

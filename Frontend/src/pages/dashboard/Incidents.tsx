@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
-  AlertTriangle, ChevronDown, ChevronUp, Clock, DollarSign, MapPin,
+  AlertTriangle, ChevronDown, ChevronUp, Clock, IndianRupee, MapPin,
   Plane, Ship, Truck, Check, X, Edit, Send, Info,
   Shield, Zap, ExternalLink, CheckCircle, Circle, Loader2, FileText,
 } from "lucide-react";
@@ -16,6 +16,7 @@ const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 import { getAccessToken, getUserId } from "@/lib/api";
 import { filterFreshIncidents } from "@/lib/incident-freshness";
 import { incidentCategoryLabel, incidentCategoryColor } from "@/lib/incident-category";
+import { fmtINR } from "@/lib/currency";
 
 function authHeaders(): HeadersInit {
   const token = getAccessToken();
@@ -271,7 +272,7 @@ const Incidents = () => {
                 </div>
                 <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-400 pl-[26px]">
                   <span className="text-red-500">{Number(incident.affected_node_count || 0)} nodes</span>
-                  <span>${Number(incident.total_exposure_usd || 0).toLocaleString()}</span>
+                  <span>{fmtINR(Number(incident.total_exposure_usd || 0))}</span>
                 </div>
               </div>
             );
@@ -341,8 +342,8 @@ const Incidents = () => {
               {[
                 {
                   label: "Exposure",
-                  value: `$${Number(detail.total_exposure_usd || 0).toLocaleString()}`,
-                  icon: DollarSign,
+                  value: fmtINR(Number(detail.total_exposure_usd || 0)),
+                  icon: IndianRupee,
                   color: "text-red-500",
                 },
                 {
@@ -409,7 +410,7 @@ const Incidents = () => {
                           {(score * 100).toFixed(0)}%
                         </div>
                         <div className="text-xs font-mono font-bold text-slate-500 mt-1">
-                          ${Number(node.exposure_usd || 0).toLocaleString()}
+                          {fmtINR(Number(node.exposure_usd || 0))}
                         </div>
                       </div>
                     </div>
@@ -526,7 +527,7 @@ const Incidents = () => {
                   let finalRecDetail = String(detail.recommendation_detail || "")
                     .replace(/0km direct/gi, `${fmtDist} km direct`)
                     .replace(/\b0\s*km\b/gi, `${fmtDist} km`)
-                    .replace(/\$0\/tonne/gi, airCost > 0 ? `$${Math.round(airCost).toLocaleString()}/tonne` : "Cost TBD")
+                    .replace(/\$0\/tonne/gi, airCost > 0 ? `${fmtINR(airCost)}/tonne` : "Cost TBD")
                     .replace(/GNN confidence/gi, "Praecantator confidence");
 
                   // Build RouteViewer URL with real lat/lng so the map renders the correct path
@@ -636,7 +637,7 @@ const Incidents = () => {
                                 )}
                                 {isViable && routeCost > 0 && (
                                   <div className="text-xs font-mono font-bold text-slate-500 flex items-center gap-1.5 justify-end">
-                                    <DollarSign size={12} className="text-slate-400" /> ${Math.round(routeCost).toLocaleString()}
+                                    <IndianRupee size={12} className="text-slate-400" /> {fmtINR(routeCost)}
                                   </div>
                                 )}
                               </div>

@@ -3,7 +3,7 @@ import { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Radar, Globe, RefreshCw, ExternalLink, Filter,
-  AlertTriangle, Clock, MapPin, Signal, DollarSign, Shield, Zap, Loader2, FlaskConical,
+  AlertTriangle, Clock, MapPin, Signal, IndianRupee, Shield, Zap, Loader2, FlaskConical,
   Plane, Ship, Truck, CheckCircle,
 } from "lucide-react";
 import { Heatmap } from "@/mapcn/heatmap";
@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { ReasoningPanel } from "@/components/workflow/ReasoningPanel";
 import { CheckpointBanner } from "@/components/workflow/CheckpointBanner";
 import type { IntelligenceGapItem, RiskEvent } from "@/lib/api";
+import { fmtINR } from "@/lib/currency";
 
 type ViewMode = "feed" | "map";
 
@@ -369,13 +370,13 @@ const Intelligence = () => {
                         {[
                           {
                             label: "Exposure",
-                            value: `$${Number(simulationIncident.total_exposure_usd || 0).toLocaleString()}`,
-                            icon: DollarSign,
+                            value: fmtINR(Number(simulationIncident.total_exposure_usd || 0)),
+                            icon: IndianRupee,
                             color: "text-red-500",
                           },
                           {
                             label: "Value At Risk",
-                            value: `$${Number(simulationIncident.value_at_risk_usd || 0).toLocaleString()}`,
+                            value: fmtINR(Number(simulationIncident.value_at_risk_usd || 0)),
                             icon: Zap,
                             color: "text-orange-500",
                           },
@@ -436,7 +437,7 @@ const Intelligence = () => {
                                     {(score * 100).toFixed(0)}%
                                   </div>
                                   <div className="text-xs font-mono font-bold text-slate-500 mt-1">
-                                    ${Number(node.exposure_usd || 0).toLocaleString()}
+                                    {fmtINR(Number(node.exposure_usd || 0))}
                                   </div>
                                 </div>
                               </div>
@@ -499,7 +500,7 @@ const Intelligence = () => {
                                   )}
                                   {Number(route.cost_usd || 0) > 0 && (
                                     <div className="text-xs font-mono font-bold text-slate-500 flex items-center gap-1.5 justify-end">
-                                      <DollarSign size={12} className="text-slate-400" /> ${Number(route.cost_usd || 0).toLocaleString()}
+                                      <IndianRupee size={12} className="text-slate-400" /> {fmtINR(Number(route.cost_usd || 0))}
                                     </div>
                                   )}
                                 </div>
@@ -535,13 +536,13 @@ const Intelligence = () => {
                             <div className="border border-slate-200 bg-white p-4 rounded shadow-sm">
                               <div className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest">Exposure Avoided</div>
                               <div className="text-xl font-bold font-headline text-red-600 mt-2">
-                                ${Number(simulation.expected_exposure_avoided_usd || 0).toLocaleString()}
+                                {fmtINR(Number(simulation.expected_exposure_avoided_usd || 0))}
                               </div>
                             </div>
                             <div className="border border-slate-200 bg-white p-4 rounded shadow-sm">
                               <div className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest">Worst Case Loss</div>
                               <div className="text-xl font-bold font-headline text-orange-600 mt-2">
-                                ${Number(simulation.worst_case_loss_usd || 0).toLocaleString()}
+                                {fmtINR(Number(simulation.worst_case_loss_usd || 0))}
                               </div>
                             </div>
                           </div>
