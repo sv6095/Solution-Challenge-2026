@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import heroGlobe from "@/assets/hero-globe.jpg";
+import { HeroGlobe } from "@/components/HeroGlobe";
 
 const LandingPage = () => {
   return (
@@ -51,8 +51,8 @@ const LandingPage = () => {
             </div>
           </div>
           <div className="relative">
-            <div className="border border-slate-200 bg-white rounded-xl overflow-hidden">
-              <img src={heroGlobe} alt="Global supply chain intelligence visualization" width={800} height={600} className="w-full" />
+            <div className="border border-slate-200 bg-white rounded-xl overflow-hidden h-[400px] md:h-[600px]">
+              <HeroGlobe />
             </div>
             <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 border border-slate-200 bg-white px-6 py-3 rounded-sm">
               <span className="text-headline-md text-red-500 font-bold">99.9%</span>

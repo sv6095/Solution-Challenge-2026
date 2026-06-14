@@ -26,3 +26,9 @@ declare module 'globe.gl' {
 
   export default Globe;
 }
+
+declare module 'react-globe.gl' {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Globe: any;
+  export default Globe;
+}
