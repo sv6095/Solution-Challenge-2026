@@ -61,8 +61,9 @@ export function HeroGlobe() {
         arcEndLng="endLng"
         arcColor="color"
         arcStroke={1.5} // Make arcs thicker
-        arcDashLength={1} // Full length dash
-        arcDashGap={0} // No spaces between dashes
+        arcDashLength={0.9} // One long continuous line
+        arcDashGap={2} // Large gap so only one line flows at a time
+        arcDashInitialGap={() => Math.random()} // Randomize start times
         arcDashAnimateTime={1500}
         arcAltitude="arcAlt"
         atmosphereColor="#ef4444"
