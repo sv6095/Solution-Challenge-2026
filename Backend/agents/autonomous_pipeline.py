@@ -735,6 +735,32 @@ async def _process_single_event(
     title = str(event.get("title", "") or event.get("event_type", "Unknown event"))
     event_type = str(event.get("event_type", "") or event.get("type", "risk"))
     description = str(event.get("description", "") or event.get("title", ""))
+
+    try:
+        from langdetect import detect
+        title_lang = detect(title) if len(title.strip()) > 5 else "en"
+        desc_lang = detect(description) if len(description.strip()) > 5 else "en"
+        
+        if title_lang != "en" or desc_lang != "en":
+            from services.llm_provider import structured_complete
+            from pydantic import BaseModel
+            
+            class EventTranslation(BaseModel):
+                title: str
+                description: str
+                
+            translated = await structured_complete(
+                prompt=f"Translate the following event title and description to English. Respond with accurate translations.\n\nTitle: {title}\nDescription: {description}",
+                output_model=EventTranslation,
+                system="You are an expert translator. Your job is to translate foreign language incident reports to English.",
+                max_tokens=400
+            )
+            title = translated.title
+            description = translated.description
+    except Exception:
+        # Fallback: if detection or translation fails, keep the original text
+        pass
+
     try:
         severity_raw = float(event.get("severity_raw") or 0)
     except (ValueError, TypeError):

@@ -21,7 +21,7 @@ import {
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
 function authHeaders(): HeadersInit {
-  const token  = getAccessToken();
+  const token = getAccessToken();
   const userId = getUserId();
   return {
     "Content-Type": "application/json",
@@ -31,12 +31,12 @@ function authHeaders(): HeadersInit {
 }
 
 const NAV_ITEMS = [
-  { title: "Command",      icon: Crosshair,     path: "/dashboard",             description: "Live briefing" },
-  { title: "Network",      icon: Network,       path: "/dashboard/network",     description: "Supplier graph" },
-  { title: "AR View",      icon: Globe2,        path: "/dashboard/ar-view",     description: "3D globe" },
-  { title: "Incidents",    icon: AlertTriangle, path: "/dashboard/incidents",   description: "Auto-analyzed" },
-  { title: "Intelligence", icon: Radar,         path: "/dashboard/intelligence", description: "Signals & map" },
-  { title: "Compliance",   icon: Shield,        path: "/dashboard/compliance",  description: "Audit & export" },
+  { title: "Command", icon: Crosshair, path: "/dashboard", description: "Live briefing" },
+  { title: "Network", icon: Network, path: "/dashboard/network", description: "Supplier graph" },
+  { title: "AR View", icon: Globe2, path: "/dashboard/ar-view", description: "3D globe" },
+  { title: "Incidents", icon: AlertTriangle, path: "/dashboard/incidents", description: "Auto-analyzed" },
+  { title: "Intelligence", icon: Radar, path: "/dashboard/intelligence", description: "Signals & map" },
+  { title: "Compliance", icon: Shield, path: "/dashboard/compliance", description: "Audit & export" },
 ];
 
 interface DashboardNotification {
@@ -101,8 +101,8 @@ const formatTimeAgo = (timestampStr: string) => {
 const PING_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
 const DashboardLayout = () => {
-  const location  = useLocation();
-  const navigate  = useNavigate();
+  const location = useLocation();
+  const navigate = useNavigate();
   const [collapsed, setCollapsed] = useState(false);
   void setCollapsed; // sidebar collapse reserved for future toggle
   const queryClient = useQueryClient();
@@ -124,14 +124,6 @@ const DashboardLayout = () => {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const lastEventRef = useRef<string | null>(null);
 
-  // ── Keep Render backend alive — ping every 5 minutes ─────────────────────
-  useEffect(() => {
-    const ping = () => fetch(`${BASE}/ping`).catch(() => undefined);
-    ping();
-    const id = setInterval(ping, PING_INTERVAL_MS);
-    return () => clearInterval(id);
-  }, []);
-
   // ── Data queries ──────────────────────────────────────────────────────────
   const { data: incidentSummary } = useQuery({
     queryKey: ["incident-summary-nav"],
@@ -139,6 +131,50 @@ const DashboardLayout = () => {
     refetchInterval: 60_000,
     enabled: hasToken,
   });
+
+  // Prefetch data for all main dashboard views in the background when signed in
+  useEffect(() => {
+    if (!hasToken) return;
+    
+    // Command Center
+    queryClient.prefetchQuery({ queryKey: ["command"], queryFn: () => api.incidents.briefing() });
+    
+    // Network View
+    queryClient.prefetchQuery({ queryKey: ["risks", "suppliers"], queryFn: () => api.risks.suppliers() });
+    queryClient.prefetchQuery({ queryKey: ["risks", "events"], queryFn: () => api.risks.events() });
+    
+    // Intelligence
+    queryClient.prefetchQuery({ queryKey: ["signals", "categorized"], queryFn: () => api.signals.categorized() });
+
+    // Incidents & Compliance
+    queryClient.prefetchQuery({
+      queryKey: ["incidents", "ACTIVE"],
+      queryFn: async () => {
+        const r = await fetch(`${BASE}/incidents`, { headers: authHeaders() });
+        if (!r.ok) throw new Error("Failed to fetch incidents");
+        return r.json();
+      }
+    });
+
+    queryClient.prefetchQuery({
+      queryKey: ["governance-audit"],
+      queryFn: async () => {
+        const r = await fetch(`${BASE}/audit`, { headers: authHeaders() });
+        if (!r.ok) return [];
+        return r.json();
+      }
+    });
+
+    queryClient.prefetchQuery({
+      queryKey: ["governance-metrics"],
+      queryFn: async () => {
+        const r = await fetch(`${BASE}/governance/summary`, { headers: authHeaders() });
+        if (!r.ok) return {};
+        return r.json();
+      }
+    });
+
+  }, [hasToken, queryClient]);
 
   const { data: checkpointData } = useQuery({
     queryKey: ["governance-checkpoints-nav"],
@@ -151,8 +187,8 @@ const DashboardLayout = () => {
     enabled: hasToken,
   });
 
-  const critCount       = incidentSummary?.critical_count ?? 0;
-  const totalNodes      = incidentSummary?.total_nodes ?? 850;
+  const critCount = incidentSummary?.critical_count ?? 0;
+  const totalNodes = incidentSummary?.total_nodes ?? 850;
   const pendingChkCount = checkpointData?.count ?? 0;
   const pendingChks: { checkpoint_id: string; incident_id: string; risk_level: string; risk_trigger: string }[] =
     checkpointData?.pending ?? [];
@@ -177,7 +213,7 @@ const DashboardLayout = () => {
   // Handle incoming WebSocket events
   useEffect(() => {
     if (!lastEvent) return;
-    
+
     // Uniquely identify the event to prevent duplicate logic execution
     const eventKey = `${lastEvent.type}-${lastEvent.timestamp}`;
     if (lastEventRef.current === eventKey) return;
@@ -318,17 +354,16 @@ const DashboardLayout = () => {
     navigate("/login");
   }
 
-  const userId       = getUserId();
-  const displayName  = getDisplayName() || userId;
-  const userInitial  = displayName ? displayName.charAt(0).toUpperCase() : "U";
+  const userId = getUserId();
+  const displayName = getDisplayName() || userId;
+  const userInitial = displayName ? displayName.charAt(0).toUpperCase() : "U";
 
   return (
     <div className="min-h-screen flex bg-background">
       {/* ── Sidebar ─────────────────────────────────────────────────────── */}
       <aside
-        className={`${
-          collapsed ? "w-14" : "w-56"
-        } shrink-0 bg-card flex flex-col transition-all duration-150 sticky top-0 h-screen border-r border-border`}
+        className={`${collapsed ? "w-14" : "w-56"
+          } shrink-0 bg-card flex flex-col transition-all duration-150 sticky top-0 h-screen border-r border-border`}
       >
         <div className="px-4 py-4 flex items-center justify-between">
           {!collapsed && (
@@ -359,11 +394,10 @@ const DashboardLayout = () => {
               <Link
                 key={item.path}
                 to={item.path}
-                className={`flex items-center gap-3 px-3 py-2.5 text-sm transition-colors duration-150 relative group ${
-                  isActive
+                className={`flex items-center gap-3 px-3 py-2.5 text-sm transition-colors duration-150 relative group ${isActive
                     ? "bg-muted text-foreground font-medium"
                     : "text-muted-foreground hover:text-foreground hover:bg-muted"
-                }`}
+                  }`}
               >
                 {isActive && (
                   <div className="absolute left-0 top-1 bottom-1 w-0.5 bg-red-500" />
@@ -395,11 +429,10 @@ const DashboardLayout = () => {
         <div className="px-2 py-2 border-t border-border">
           <Link
             to="/dashboard/settings"
-            className={`flex items-center gap-3 px-3 py-2 text-sm transition-colors duration-150 ${
-              location.pathname === "/dashboard/settings"
+            className={`flex items-center gap-3 px-3 py-2 text-sm transition-colors duration-150 ${location.pathname === "/dashboard/settings"
                 ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground"
-            }`}
+              }`}
           >
             <Settings size={14} />
             {!collapsed && <span className="text-xs font-headline">Settings</span>}
@@ -488,9 +521,8 @@ const DashboardLayout = () => {
                         <div
                           key={chk.id}
                           onClick={() => handleNotificationClick(chk)}
-                          className={`flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors cursor-pointer relative ${
-                            !chk.read ? "bg-red-500/[0.02]" : ""
-                          }`}
+                          className={`flex items-start gap-3 px-4 py-3 hover:bg-muted/40 transition-colors cursor-pointer relative ${!chk.read ? "bg-red-500/[0.02]" : ""
+                            }`}
                         >
                           {!chk.read && (
                             <div className="absolute left-1.5 top-1/2 -translate-y-1/2 w-1.5 h-1.5 bg-red-500 rounded-full" />

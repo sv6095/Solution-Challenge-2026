@@ -374,6 +374,31 @@ async def _poll_sources() -> None:
             for evt in events[:25]:
                 if evt["id"] in existing_ids:
                     continue
+                try:
+                    from langdetect import detect
+                    title = str(evt.get("title") or "")
+                    desc = str(evt.get("description") or "")
+                    title_lang = detect(title) if len(title.strip()) > 5 else "en"
+                    desc_lang = detect(desc) if len(desc.strip()) > 5 else "en"
+                    if title_lang != "en" or desc_lang != "en":
+                        from services.llm_provider import structured_complete
+                        from pydantic import BaseModel
+                        
+                        class EventTranslation(BaseModel):
+                            title: str
+                            description: str
+                            
+                        translated = await structured_complete(
+                            prompt=f"Translate the following event title and description to English.\n\nTitle: {title}\nDescription: {desc}",
+                            output_model=EventTranslation,
+                            system="You are an expert translator. Your job is to translate foreign language incident reports to English.",
+                            max_tokens=400
+                        )
+                        evt["title"] = translated.title
+                        evt["description"] = translated.description
+                except Exception:
+                    pass
+                
                 inc = incident_engine.process_event(evt, suppliers_for_gnn)
                 if inc:
                     upsert_incident(inc.id, inc.to_dict(), inc.status, inc.severity, tenant_id=tenant_id)

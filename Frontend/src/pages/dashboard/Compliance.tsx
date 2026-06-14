@@ -27,7 +27,7 @@ const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 import { getAccessToken, getUserId } from "@/lib/api";
 
 function authHeaders(): HeadersInit {
-  const token  = getAccessToken();
+  const token = getAccessToken();
   const userId = getUserId();
   return {
     "Content-Type": "application/json",
@@ -43,17 +43,17 @@ async function authFetch<T>(url: string, opts?: RequestInit): Promise<T> {
 }
 
 const STATUS_BADGE: Record<string, { bg: string; text: string; icon: React.ElementType }> = {
-  RESOLVED:          { bg: "bg-emerald-50",  text: "text-emerald-600", icon: Check },
-  APPROVED:          { bg: "bg-green-50",    text: "text-green-600",   icon: Check },
-  DISMISSED:         { bg: "bg-slate-100",   text: "text-slate-400",   icon: X },
-  AWAITING_APPROVAL: { bg: "bg-red-50",      text: "text-red-600",     icon: AlertTriangle },
+  RESOLVED: { bg: "bg-emerald-50", text: "text-emerald-600", icon: Check },
+  APPROVED: { bg: "bg-green-50", text: "text-green-600", icon: Check },
+  DISMISSED: { bg: "bg-slate-100", text: "text-slate-400", icon: X },
+  AWAITING_APPROVAL: { bg: "bg-red-50", text: "text-red-600", icon: AlertTriangle },
 };
 
 const VERDICT_META: Record<string, { label: string; color: string; bg: string; icon: React.ElementType }> = {
-  TRUE_POSITIVE:  { label: "True Positive",  color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200", icon: CheckCircle2 },
-  FALSE_POSITIVE: { label: "False Positive", color: "text-red-600",     bg: "bg-red-50 border-red-200",         icon: XCircle },
-  FALSE_NEGATIVE: { label: "False Negative", color: "text-orange-600",  bg: "bg-orange-50 border-orange-200",   icon: AlertTriangle },
-  UNCERTAIN:      { label: "Uncertain",      color: "text-slate-400",   bg: "bg-slate-50 border-slate-200",      icon: HelpCircle },
+  TRUE_POSITIVE: { label: "True Positive", color: "text-emerald-600", bg: "bg-emerald-50 border-emerald-200", icon: CheckCircle2 },
+  FALSE_POSITIVE: { label: "False Positive", color: "text-red-600", bg: "bg-red-50 border-red-200", icon: XCircle },
+  FALSE_NEGATIVE: { label: "False Negative", color: "text-orange-600", bg: "bg-orange-50 border-orange-200", icon: AlertTriangle },
+  UNCERTAIN: { label: "Uncertain", color: "text-slate-400", bg: "bg-slate-50 border-slate-200", icon: HelpCircle },
 };
 
 type Tab = "incidents" | "post-action" | "replay" | "metrics" | "audit";
@@ -133,18 +133,18 @@ const Compliance = () => {
 
   // ── Derived ──
   const resolvedIncidents = (incidents as Record<string, unknown>[]).filter((i) =>
-    ["RESOLVED", "APPROVED", "DISMISSED"].includes(String(i.status))
+    ["RESOLVED", "APPROVED", "DISMISSED", "AWAITING_APPROVAL"].includes(String(i.status))
   );
   const postRecords = postActionData?.records ?? [];
-  const replayRuns  = replayData?.runs ?? [];
-  const gm          = govMetrics ?? {};
+  const replayRuns = replayData?.runs ?? [];
+  const gm = govMetrics ?? {};
 
   const TABS: { key: Tab; label: string; count?: number; icon: React.ElementType }[] = [
-    { key: "incidents",    label: "Incidents",    count: resolvedIncidents.length, icon: Shield },
-    { key: "post-action",  label: "Post-Action",  count: postRecords.length,       icon: CheckCircle2 },
-    { key: "replay",       label: "Replay",       count: replayRuns.length,        icon: Play },
-    { key: "metrics",      label: "Metrics",                                       icon: BarChart3 },
-    { key: "audit",        label: "System Log",   count: (auditLog as any[]).length, icon: FileText },
+    { key: "incidents", label: "Incidents", count: resolvedIncidents.length, icon: Shield },
+    { key: "post-action", label: "Post-Action", count: postRecords.length, icon: CheckCircle2 },
+    { key: "replay", label: "Replay", count: replayRuns.length, icon: Play },
+    { key: "metrics", label: "Metrics", icon: BarChart3 },
+    { key: "audit", label: "System Log", count: (auditLog as any[]).length, icon: FileText },
   ];
 
   return (
@@ -164,18 +164,16 @@ const Compliance = () => {
                 <button
                   key={t.key}
                   onClick={() => setTab(t.key)}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-headline font-bold uppercase tracking-widest transition-all rounded-md ${
-                    tab === t.key
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-[10px] font-headline font-bold uppercase tracking-widest transition-all rounded-md ${tab === t.key
                       ? "bg-white text-red-600 shadow-sm ring-1 ring-slate-200"
                       : "text-slate-400 hover:text-slate-600 hover:bg-white/50"
-                  }`}
+                    }`}
                 >
                   <Icon size={11} />
                   {t.label}
                   {t.count !== undefined && t.count > 0 && (
-                    <span className={`ml-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded ${
-                      tab === t.key ? "bg-red-50 text-red-600" : "bg-slate-200 text-slate-500"
-                    }`}>
+                    <span className={`ml-1.5 text-[9px] font-mono px-1.5 py-0.5 rounded ${tab === t.key ? "bg-red-50 text-red-600" : "bg-slate-200 text-slate-500"
+                      }`}>
                       {t.count}
                     </span>
                   )}
@@ -250,7 +248,7 @@ const Compliance = () => {
           <div className="divide-y divide-slate-100">
             {resolvedIncidents.length === 0 && (
               <div className="p-12 text-center text-slate-400 font-mono font-bold text-sm uppercase tracking-widest">
-                No resolved incidents in ledger.
+                No incidents in ledger.
               </div>
             )}
             {resolvedIncidents.map((inc) => {
@@ -261,9 +259,8 @@ const Compliance = () => {
                 <div key={String(inc.id)}>
                   <div
                     onClick={() => setExpandedId(isExpanded ? null : String(inc.id))}
-                    className={`flex items-center gap-5 px-6 py-4 cursor-pointer transition-colors ${
-                      isExpanded ? "bg-slate-50" : "hover:bg-slate-50"
-                    }`}
+                    className={`flex items-center gap-5 px-6 py-4 cursor-pointer transition-colors ${isExpanded ? "bg-slate-50" : "hover:bg-slate-50"
+                      }`}
                   >
                     <div className="w-10 flex justify-center">
                       <span className={`inline-flex items-center justify-center w-8 h-8 rounded-lg shadow-sm border border-slate-200 ${badge.bg}`}>
@@ -315,26 +312,24 @@ const Compliance = () => {
                         <p className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-widest mb-4">Autonomous Execution Timeline</p>
                         <div className="flex items-center justify-between mx-4">
                           {[
-                            { stage: "DETECT",  time: inc.created_at,  done: true },
+                            { stage: "DETECT", time: inc.created_at, done: true },
                             { stage: "ANALYZE", time: inc.analyzed_at, done: true },
-                            { stage: "DECIDE",  time: inc.approved_at, done: inc.status !== "DISMISSED" },
+                            { stage: "DECIDE", time: inc.approved_at, done: inc.status !== "DISMISSED" },
                             { stage: "EXECUTE", time: inc.resolved_at || inc.approved_at, done: inc.status === "APPROVED" || inc.status === "RESOLVED" },
-                            { stage: "AUDIT",   time: inc.updated_at,  done: true },
+                            { stage: "AUDIT", time: inc.updated_at, done: true },
                           ].map((step, idx, arr) => (
                             <div key={step.stage} className="flex flex-col items-center relative group">
-                              <div className={`w-3 h-3 rounded-full z-10 transition-transform group-hover:scale-125 ${
-                                step.done ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]" : "bg-slate-200"
-                              }`} />
+                              <div className={`w-3 h-3 rounded-full z-10 transition-transform group-hover:scale-125 ${step.done ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.4)]" : "bg-slate-200"
+                                }`} />
                               <span className={`text-[10px] font-mono font-bold mt-2 tracking-wide ${step.done ? "text-slate-900" : "text-slate-400"}`}>
                                 {step.stage}
                               </span>
                               <span className="text-[9px] font-mono text-slate-400 mt-1 uppercase">
-                                {step.time ? new Date(String(step.time)).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : "—"}
+                                {step.time ? new Date(String(step.time)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "—"}
                               </span>
                               {idx < arr.length - 1 && (
-                                <div className={`absolute h-0.5 w-[calc(100%+4rem)] top-1.5 left-1.5 -z-0 ${
-                                  arr[idx+1].done ? "bg-red-200" : "bg-slate-100"
-                                }`} />
+                                <div className={`absolute h-0.5 w-[calc(100%+4rem)] top-1.5 left-1.5 -z-0 ${arr[idx + 1].done ? "bg-red-200" : "bg-slate-100"
+                                  }`} />
                               )}
                             </div>
                           ))}
@@ -392,8 +387,7 @@ const Compliance = () => {
                           <span className="text-base font-headline font-bold text-slate-900 uppercase tracking-tight">
                             {String(rec.event_title || "Incident")}
                           </span>
-                          <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded shadow-sm border ${
-                            STATUS_BADGE[rec.status]?.bg} ${STATUS_BADGE[rec.status]?.text} ${STATUS_BADGE[rec.status]?.text.replace('text-', 'border-')}/30`}>
+                          <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded shadow-sm border ${STATUS_BADGE[rec.status]?.bg} ${STATUS_BADGE[rec.status]?.text} ${STATUS_BADGE[rec.status]?.text.replace('text-', 'border-')}/30`}>
                             {String(rec.status || "").replace(/_/g, " ")}
                           </span>
                           {vd && (
@@ -442,7 +436,7 @@ const Compliance = () => {
               <div className="flex items-start gap-3">
                 <HelpCircle size={16} className="text-blue-500 mt-0.5" />
                 <p className="text-[11px] font-mono font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
-                  Historical Analysis Mode: Replay autonomous execution paths to verify reasoning logic. 
+                  Historical Analysis Mode: Replay autonomous execution paths to verify reasoning logic.
                   Replays generate a new <span className="text-blue-600">audit trail</span> without re-executing external API impacts.
                 </p>
               </div>
@@ -465,13 +459,12 @@ const Compliance = () => {
                         <span className="text-sm font-headline font-bold text-slate-900 uppercase tracking-tight">
                           {String(run.orchestration_path || "autonomous_pipeline")}
                         </span>
-                        <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded shadow-sm border ${
-                          run.status === "COMPLETED"
+                        <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded shadow-sm border ${run.status === "COMPLETED"
                             ? "bg-emerald-50 text-emerald-600 border-emerald-200"
                             : run.status === "FAILED"
-                            ? "bg-red-50 text-red-600 border-red-200"
-                            : "bg-amber-50 text-amber-600 border-amber-200"
-                        }`}>
+                              ? "bg-red-50 text-red-600 border-red-200"
+                              : "bg-amber-50 text-amber-600 border-amber-200"
+                          }`}>
                           {String(run.status || "UNKNOWN")}
                         </span>
                       </div>
@@ -514,10 +507,10 @@ const Compliance = () => {
                 {/* KPI strip */}
                 <div className="grid grid-cols-4 gap-4">
                   {[
-                    { label: "Feedback Loop",     value: String(gm.total_feedback ?? 0), color: "text-slate-900" },
-                    { label: "Praecantator Precision", value: `${((gm.precision ?? 0) * 100).toFixed(1)}%`,  color: "text-emerald-600" },
-                    { label: "Praecantator Recall",    value: `${((gm.recall ?? 0) * 100).toFixed(1)}%`,    color: "text-blue-600" },
-                    { label: "Stability Score",   value: `${((gm.f1_score ?? 0) * 100).toFixed(1)}%`,  color: "text-red-500" },
+                    { label: "Feedback Loop", value: String(gm.total_feedback ?? 0), color: "text-slate-900" },
+                    { label: "Praecantator Precision", value: `${((gm.precision ?? 0) * 100).toFixed(1)}%`, color: "text-emerald-600" },
+                    { label: "Praecantator Recall", value: `${((gm.recall ?? 0) * 100).toFixed(1)}%`, color: "text-blue-600" },
+                    { label: "Stability Score", value: `${((gm.f1_score ?? 0) * 100).toFixed(1)}%`, color: "text-red-500" },
                   ].map((m) => (
                     <div key={m.label} className="border border-slate-200 bg-white p-6 rounded-xl shadow-sm border-b-4 border-b-slate-100">
                       <div className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.15em] mb-3">{m.label}</div>
@@ -530,9 +523,9 @@ const Compliance = () => {
                 <div className="grid grid-cols-2 gap-8">
                   <div className="border border-slate-200 bg-white p-8 rounded-xl shadow-sm space-y-6">
                     <p className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-[0.2em] mb-4">Pipeline Quality Index</p>
-                    <MetricBar label="Detection Precision"  value={gm.precision  ?? 0} color="text-emerald-500" />
-                    <MetricBar label="Risk Recall Rate"     value={gm.recall     ?? 0} color="text-blue-500" />
-                    <MetricBar label="Composite F1 Score"   value={gm.f1_score   ?? 0} color="text-red-500" />
+                    <MetricBar label="Detection Precision" value={gm.precision ?? 0} color="text-emerald-500" />
+                    <MetricBar label="Risk Recall Rate" value={gm.recall ?? 0} color="text-blue-500" />
+                    <MetricBar label="Composite F1 Score" value={gm.f1_score ?? 0} color="text-red-500" />
                   </div>
 
                   {/* Verdict breakdown */}

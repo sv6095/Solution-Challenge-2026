@@ -147,7 +147,6 @@ export function IncidentFlyoverMap({ apiKey, disruption, nodes, routes, onBack }
           fullscreenControl: false,
           streetViewControl: false,
           mapTypeControl: false,
-          renderingType: "VECTOR",
         });
 
         mapRef.current = map;
@@ -206,7 +205,7 @@ export function IncidentFlyoverMap({ apiKey, disruption, nodes, routes, onBack }
                 <div style="margin-top:4px;font-size:14px;font-weight:800">${highestRiskSupplier.name}</div>
                 <div style="margin-top:2px;font-size:12px;color:#4b5563">${highestRiskSupplier.country || highestRiskSupplier.tier || "Supplier node"} · Risk ${Math.round(risk)}</div>
                 <div style="margin-top:10px;display:grid;gap:6px;font-size:12px">
-                  <div><b>Exposure:</b> ${fmtMoney(disruption.exposure_usd || highestRiskSupplier.daily_throughput_usd)}</div>
+                  <div><b>Exposure:</b> ${fmtMoney(disruption.exposure_usd || highestRiskSupplier.daily_throughput_usd || 0)}</div>
                   <div><b>Days to stockout:</b> ${Number(disruption.min_stockout_days || 0).toFixed(1)}</div>
                   <div><b>CO2 route delta:</b> ${co2Delta > 0 ? "+" : ""}${Math.round(co2Delta).toLocaleString()} kg</div>
                 </div>
