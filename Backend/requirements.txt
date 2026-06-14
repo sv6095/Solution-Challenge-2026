@@ -33,3 +33,6 @@ torch_geometric==2.5.3
 feedparser==6.0.11
 # Language detection — used to filter/translate non-English incident signals
 langdetect==1.0.9
+# Maritime routing (Eurostat searoute) — powers /api/sea-route endpoint
+searoute==1.6.0
+geojson==3.3.0

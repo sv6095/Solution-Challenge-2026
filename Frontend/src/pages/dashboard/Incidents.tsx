@@ -1,10 +1,12 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
-  AlertTriangle, ChevronDown, ChevronUp, Clock, IndianRupee, MapPin,
+  AlertTriangle, ChevronRight, Clock, IndianRupee, MapPin,
   Plane, Ship, Truck, Check, X, Edit, Send, Info,
-  Shield, Zap, ExternalLink, CheckCircle, Circle, Loader2, FileText,
+  Shield, Zap, ExternalLink, CheckCircle, Loader2, FileText,
+  Navigation, Search, Filter, ArrowRight, Leaf, DollarSign,
+  Activity, BarChart2, MessageSquare, GitBranch, Radio, Circle,
 } from "lucide-react";
 import { ReasoningPanel } from "@/components/workflow/ReasoningPanel";
 import { CheckpointBanner } from "@/components/workflow/CheckpointBanner";
@@ -36,114 +38,164 @@ async function authFetch<T>(url: string, options?: RequestInit): Promise<T> {
 
 const fetchIncidents = (status?: string) =>
   authFetch<unknown[]>(`${BASE}/incidents${status ? `?status=${status}` : ""}`);
-interface AffectedNode {
-  id: string;
-  name: string;
-  location: string;
-  tier: number;
-  risk_score: number;
-  exposure_usd: number;
-  safety_stock_days: number;
-  stockout_days: number;
-  mode?: string;
-  single_source?: boolean;
-  country?: string;
-  detail?: string;
-  lat?: number;
-  lng?: number;
-}
 
+interface AffectedNode {
+  id: string; name: string; location: string; tier: number;
+  risk_score: number; exposure_usd: number; safety_stock_days: number;
+  stockout_days: number; mode?: string; single_source?: boolean;
+  country?: string; detail?: string; lat?: number; lng?: number;
+}
 interface Incident {
-  id: string;
-  event_id: string;
-  event_title: string;
-  event_description: string;
-  severity: string;
-  status: string;
-  affected_nodes: AffectedNode[];
-  affected_node_count: number;
-  total_exposure_usd: number;
-  min_stockout_days: number;
-  gnn_confidence: number;
-  created_at: string;
-  source_url?: string;
-  source?: string;
-  source_category?: string;
+  id: string; event_id: string; event_title: string; event_description: string;
+  severity: string; status: string;
+  affected_nodes: AffectedNode[]; affected_node_count: number;
+  total_exposure_usd: number; min_stockout_days: number; gnn_confidence: number;
+  created_at: string; source_url?: string; source?: string; source_category?: string;
   pipeline_ms?: number;
   route_options: {
-    mode: string;
-    description: string;
-    transit_days: number;
-    cost_usd: number;
-    recommended: boolean;
-    status_label?: string;
+    mode: string; description: string; transit_days: number;
+    cost_usd: number; recommended: boolean; status_label?: string;
   }[];
-  recommendation: string;
-  recommendation_detail: string;
-  backup_supplier?: {
-    name: string;
-    location: string;
-    lead_time_days: number;
-    email: string;
-  };
-  rfq_draft?: {
-    provider: string;
-    to: string;
-    subject: string;
-    body: string;
-    editable: boolean;
-  };
+  recommendation: string; recommendation_detail: string;
+  backup_supplier?: { name: string; location: string; lead_time_days: number; email: string; lat?: number; lng?: number; };
+  rfq_draft?: { provider: string; to: string; subject: string; body: string; editable: boolean; };
   awb_reference?: string;
-  execution_timeline?: {
-    action: string;
-    time: string;
-    detail: string;
-  }[];
-  approved_by?: string;
-  approved_at?: string;
-  resolved_at?: string;
-  dismiss_reason?: string;
-  simulation_outcome?: string;
-  simulation_only?: boolean;
+  execution_timeline?: { action: string; time: string; detail: string; }[];
+  approved_by?: string; approved_at?: string; resolved_at?: string;
+  dismiss_reason?: string; simulation_outcome?: string; simulation_only?: boolean;
 }
 
-const fetchIncident = (id: string) =>
-  authFetch<Incident>(`${BASE}/incidents/${id}`);
 const approveIncident = (id: string, action: string, reason = "") =>
   authFetch<any>(`${BASE}/incidents/${id}/approve`, {
     method: "POST",
     body: JSON.stringify({ action, reason }),
   });
 
-const STATUS_COLORS: Record<string, string> = {
-  AWAITING_APPROVAL: "text-red-600 bg-red-50 border border-red-100",
-  ANALYZED: "text-blue-600 bg-blue-50 border border-blue-100",
-  DETECTED: "text-yellow-600 bg-yellow-50 border border-yellow-100",
-  APPROVED: "text-green-600 bg-green-50 border border-green-100",
-  RESOLVED: "text-emerald-600 bg-emerald-50 border border-emerald-100",
-  DISMISSED: "text-slate-400 bg-slate-100",
+/* ── Design tokens ──────────────────────────────────────────────────────── */
+const STATUS_META: Record<string, { label: string; dot: string; bg: string; text: string; border: string }> = {
+  AWAITING_APPROVAL: { label: "Awaiting Approval", dot: "#ef4444", bg: "#fef2f2", text: "#dc2626", border: "#fecaca" },
+  ANALYZED:         { label: "Analyzed",           dot: "#3b82f6", bg: "#eff6ff", text: "#2563eb", border: "#bfdbfe" },
+  DETECTED:         { label: "Detected",           dot: "#f59e0b", bg: "#fffbeb", text: "#d97706", border: "#fde68a" },
+  APPROVED:         { label: "Approved",           dot: "#10b981", bg: "#ecfdf5", text: "#059669", border: "#a7f3d0" },
+  RESOLVED:         { label: "Resolved",           dot: "#10b981", bg: "#ecfdf5", text: "#059669", border: "#a7f3d0" },
+  DISMISSED:        { label: "Dismissed",          dot: "#94a3b8", bg: "#f8fafc", text: "#64748b", border: "#e2e8f0" },
 };
 
-const SEVERITY: Record<string, { bg: string; text: string; icon: string }> = {
-  CRITICAL: { bg: "bg-red-50 border-red-200", text: "text-red-600", icon: "★" },
-  HIGH: { bg: "bg-orange-50 border-orange-200", text: "text-orange-600", icon: "◉" },
-  MODERATE: { bg: "bg-yellow-50 border-yellow-200", text: "text-yellow-600", icon: "◎" },
-  LOW: { bg: "bg-green-50 border-green-200", text: "text-green-600", icon: "○" },
+const SEV_META: Record<string, { color: string; bg: string; border: string; ring: string }> = {
+  CRITICAL: { color: "#dc2626", bg: "#fef2f2", border: "#fecaca", ring: "#ef4444" },
+  HIGH:     { color: "#ea580c", bg: "#fff7ed", border: "#fed7aa", ring: "#f97316" },
+  MODERATE: { color: "#ca8a04", bg: "#fefce8", border: "#fef08a", ring: "#eab308" },
+  LOW:      { color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0", ring: "#22c55e" },
 };
 
-const MODE_ICONS: Record<string, React.ElementType> = { air: Plane, sea: Ship, land: Truck, hybrid: Truck };
+const MODE_ICONS: Record<string, React.ElementType> = { air: Plane, sea: Ship, land: Truck, hybrid: Navigation };
+const MODE_COLOR: Record<string, string> = { air: "#dc2626", sea: "#2563eb", land: "#16a34a", hybrid: "#7c3aed" };
 
+const COUNTRY_CENTROIDS: Record<string, [number, number]> = {
+  IN: [20.59, 78.96], CN: [35.86, 104.19], US: [37.09, -95.71], DE: [51.16, 10.45],
+  GB: [55.37, -3.43], JP: [36.20, 138.25], KR: [35.90, 127.86], SG: [1.35, 103.82],
+  AE: [23.42, 53.84], SA: [23.88, 45.08], AU: [-25.27, 133.77], BR: [-14.23, -51.92],
+  FR: [46.22, 2.21], NL: [52.13, 5.29], MX: [23.63, -102.55], VN: [14.05, 108.27],
+  TH: [15.87, 100.99], MY: [4.21, 101.97], ID: [-0.79, 113.92], PH: [12.88, 121.77],
+  PK: [30.37, 69.34], BD: [23.68, 90.35], TW: [23.69, 120.96], HK: [22.39, 114.11],
+};
+
+function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  if (lat1 === lat2 && lon1 === lon2) return 0;
+  const R = 6371, r = Math.PI / 180;
+  const dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+/* ── Tab types ──────────────────────────────────────────────────────────── */
+type Tab = "overview" | "routes" | "communication" | "timeline";
+
+/* ── Severity pulse dot ────────────────────────────────────────────────── */
+function PulseDot({ color, active }: { color: string; active: boolean }) {
+  return (
+    <span className="relative flex h-2.5 w-2.5 shrink-0">
+      {active && <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-50" style={{ background: color }} />}
+      <span className="relative inline-flex rounded-full h-2.5 w-2.5" style={{ background: color }} />
+    </span>
+  );
+}
+
+/* ── Incident card in left panel ─────────────────────────────────────────── */
+function IncidentCard({ incident, isSelected, onClick }: { incident: any; isSelected: boolean; onClick: () => void }) {
+  const sev = SEV_META[String(incident.severity)] ?? SEV_META.LOW;
+  const stat = STATUS_META[String(incident.status)] ?? STATUS_META.DISMISSED;
+  const isUrgent = incident.status === "AWAITING_APPROVAL";
+  return (
+    <motion.div
+      layout
+      initial={{ opacity: 0, x: -8 }}
+      animate={{ opacity: 1, x: 0 }}
+      onClick={onClick}
+      className="cursor-pointer transition-all border-l-[3px]"
+      style={{
+        borderLeftColor: isSelected ? sev.ring : "transparent",
+        background: isSelected ? "#f8fafc" : "transparent",
+        padding: "14px 16px",
+      }}
+    >
+      <div className="flex items-start gap-3">
+        <PulseDot color={sev.ring} active={isUrgent} />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-bold text-slate-900 truncate flex-1 leading-tight">
+              {String(incident.event_title || "Disruption")}
+            </span>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap mb-2">
+            <span
+              className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded border"
+              style={{ color: sev.color, background: sev.bg, borderColor: sev.border }}
+            >
+              {String(incident.severity)}
+            </span>
+            <span
+              className="text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded border"
+              style={{ color: incidentCategoryColor(incident) ? undefined : stat.text, background: "#f8fafc", borderColor: "#e2e8f0" }}
+            >
+              {incidentCategoryLabel(incident)}
+            </span>
+          </div>
+          <div className="flex items-center justify-between text-[10px] font-mono font-bold text-slate-400">
+            <span className="text-red-500">{Number(incident.affected_node_count || 0)} nodes</span>
+            <span>{fmtINR(Number(incident.total_exposure_usd || 0))}</span>
+            <span>{incident.created_at ? timeAgo(String(incident.created_at)) : "—"}</span>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+/* ── Main component ─────────────────────────────────────────────────────── */
 const Incidents = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedId = searchParams.get("id");
   const [statusFilter, setStatusFilter] = useState<string>("ACTIVE");
-  const [rfqExpanded, setRfqExpanded] = useState(false);
+  const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<Tab>("overview");
   const [approveLoading, setApproveLoading] = useState(false);
   const [executionResult, setExecutionResult] = useState<Record<string, unknown> | null>(null);
+  const [dismissReason, setDismissReason] = useState("");
+  const [showDismissDialog, setShowDismissDialog] = useState(false);
   const qc = useQueryClient();
   const navigate = useNavigate();
+  const detailPanelRef = useRef<HTMLDivElement>(null);
 
-  // "ACTIVE" is a virtual filter that fetches all and filters client-side
   const activeStatuses = ["DETECTED", "ANALYZED", "AWAITING_APPROVAL"];
   const fetchStatusParam = statusFilter === "ACTIVE" ? undefined : (statusFilter || undefined);
 
@@ -152,16 +204,18 @@ const Incidents = () => {
     queryFn: () => fetchIncidents(fetchStatusParam),
     refetchInterval: 15_000,
   });
+
   const incidentsAll: Record<string, unknown>[] = Array.isArray(incidentsRaw) ? incidentsRaw as Record<string, unknown>[] : [];
   const freshIncidents = filterFreshIncidents(incidentsAll).filter((inc, idx, arr) => {
     const key = String(inc.event_title || inc.title || inc.id || "").trim().toLowerCase();
-    return arr.findIndex((other) => String(other.event_title || other.title || other.id || "").trim().toLowerCase() === key) === idx;
+    return arr.findIndex((o) => String(o.event_title || o.title || o.id || "").trim().toLowerCase() === key) === idx;
   });
-
-  // When "ACTIVE" filter is selected, only show non-resolved/non-dismissed incidents
-  const incidents = statusFilter === "ACTIVE"
+  const incidents = (statusFilter === "ACTIVE"
     ? freshIncidents.filter((inc) => activeStatuses.includes(String(inc.status || "")))
-    : freshIncidents;
+    : freshIncidents
+  ).filter((inc) =>
+    !search || String(inc.event_title || "").toLowerCase().includes(search.toLowerCase())
+  );
 
   const { data: detail, refetch: refetchDetail } = useQuery<Incident>({
     queryKey: ["incident", selectedId],
@@ -172,13 +226,10 @@ const Incidents = () => {
   const action = useMutation({
     mutationFn: async (vars: { id: string; action: string; reason?: string }) => {
       if (vars.action === "approve") setApproveLoading(true);
-      const result = await approveIncident(vars.id, vars.action, vars.reason);
-      return result;
+      return await approveIncident(vars.id, vars.action, vars.reason);
     },
     onSuccess: (data) => {
-      if (data?.execution_timeline) {
-        setExecutionResult(data);
-      }
+      if (data?.execution_timeline) setExecutionResult(data);
       setApproveLoading(false);
       qc.invalidateQueries({ queryKey: ["incidents"] });
       qc.invalidateQueries({ queryKey: ["incident", selectedId] });
@@ -187,48 +238,134 @@ const Incidents = () => {
     },
     onError: (err: any) => {
       setApproveLoading(false);
-      const detail = err.message || "Failed to approve decision.";
-      alert(`Approval Failed: ${detail}`);
+      alert(`Action Failed: ${err.message || "Unknown error"}`);
     },
   });
 
+  useEffect(() => { setExecutionResult(null); setActiveTab("overview"); }, [selectedId]);
   useEffect(() => {
-    setExecutionResult(null);
-    setRfqExpanded(false);
-  }, [selectedId]);
-
-  useEffect(() => {
-    if (!selectedId && incidents.length > 0) {
-      setSearchParams({ id: String(incidents[0].id) });
-    }
+    if (!selectedId && incidents.length > 0) setSearchParams({ id: String(incidents[0].id) });
   }, [incidents, selectedId, setSearchParams]);
 
-  const statuses = ["ACTIVE", "", "AWAITING_APPROVAL", "ANALYZED", "APPROVED", "RESOLVED", "DISMISSED"];
-  const canExecuteIncident =
-    detail?.status === "AWAITING_APPROVAL" &&
+  // Scroll to top of detail when incident changes
+  useEffect(() => { detailPanelRef.current?.scrollTo({ top: 0, behavior: "smooth" }); }, [selectedId]);
+
+  const canAct = detail?.status === "AWAITING_APPROVAL" &&
     String(detail?.simulation_outcome || "").toLowerCase() !== "no_impact" &&
     !Boolean(detail?.simulation_only && Number(detail?.affected_node_count || 0) === 0);
 
+  /* ── Derive route coords from incident data ─────────────────────────── */
+  const nodes = detail?.affected_nodes || [];
+  const originNode = nodes.find(n => n.lat != null && n.lng != null && (n.lat !== 0 || n.lng !== 0)) || nodes[0];
+  let originLat = originNode?.lat ?? 0, originLng = originNode?.lng ?? 0;
+  const originLabel = originNode?.name || originNode?.country || "Origin";
+  if (!originLat && !originLng && originNode?.country) {
+    const cc = COUNTRY_CENTROIDS[String(originNode.country).toUpperCase().slice(0, 2)];
+    if (cc) { originLat = cc[0]; originLng = cc[1]; }
+  }
+  let destLat = 0, destLng = 0, destLabel = "Destination";
+  if (detail?.backup_supplier) {
+    destLabel = detail.backup_supplier.name || detail.backup_supplier.location || "Backup Supplier";
+    if ((detail.backup_supplier as any).lat != null) {
+      destLat = Number((detail.backup_supplier as any).lat);
+      destLng = Number((detail.backup_supplier as any).lng);
+    }
+    if (!destLat && !destLng) {
+      const loc = String(detail.backup_supplier.location || "").trim().toUpperCase().slice(0, 2);
+      const cc = COUNTRY_CENTROIDS[loc];
+      if (cc) { destLat = cc[0]; destLng = cc[1]; }
+    }
+  } else {
+    const sorted = [...nodes].filter(n => n.lat != null && n.lng != null).sort((a, b) => Number(b.exposure_usd || 0) - Number(a.exposure_usd || 0));
+    const destNode = sorted.find(n => n.id !== originNode?.id) || sorted[1] || null;
+    if (destNode) { destLat = destNode.lat ?? 0; destLng = destNode.lng ?? 0; destLabel = destNode.name || destNode.country || "Destination"; }
+  }
+  if (!destLat && !destLng) {
+    const cc = COUNTRY_CENTROIDS["SG"]!;
+    destLat = cc[0]; destLng = cc[1]; destLabel = "SG Hub";
+  }
+  let dist = haversineKm(originLat, originLng, destLat, destLng);
+  if (dist < 1) {
+    const alt = COUNTRY_CENTROIDS["SG"]!;
+    destLat = alt[0]; destLng = alt[1]; destLabel = "SG Hub";
+    dist = haversineKm(originLat, originLng, destLat, destLng);
+  }
+
+  function openRouteViewer(mode: string, days: number, cost: number) {
+    const p = new URLSearchParams({
+      mode, fromLat: String(originLat), fromLng: String(originLng), fromLabel: originLabel,
+      toLat: String(destLat), toLng: String(destLng), toLabel: destLabel,
+      cost: String(Math.round(cost)), days: String(days.toFixed(1)),
+      incident: String(detail?.event_title || ""),
+    });
+    navigate(`/dashboard/route-viewer?${p.toString()}`);
+  }
+
+  /* ── Compute real route costs from distance ─────────────────────────────── */
+  const AIR_RATE = dist < 3000 ? 4.20 : 2.90;  // $/kg
+  const SEA_RATE = dist < 8000 ? 0.20 : 0.14;   // $/TEU-km
+  const airCost  = dist * AIR_RATE * 5 + 600;   // 5 kg weight × rate
+  const seaCost  = dist * SEA_RATE + 800;
+  const landCost = dist > 6000 ? 0 : dist * 2.10 + 300;
+  const airDays  = dist / 900 / 24 + 0.5;
+  const seaDays  = dist * 1.25 / (35 * 1.852) / 24 + 2;
+  const landDays = dist > 6000 ? 0 : dist / 80 / 24 + 0.25;
+  const seaDist  = dist * 1.25;
+
+  /* ── Status bar color ───────────────────────────────────────────────────── */
+  const statusMeta = STATUS_META[String(detail?.status || "")] ?? STATUS_META.DISMISSED;
+  const sevMeta    = SEV_META[String(detail?.severity || "")] ?? SEV_META.LOW;
+
+  const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
+    { id: "overview",       label: "Overview",       icon: Activity },
+    { id: "routes",         label: "Routes",         icon: Navigation },
+    { id: "communication",  label: "Communication",  icon: MessageSquare },
+    { id: "timeline",       label: "Timeline",       icon: GitBranch },
+  ];
+
+  /* ─── Render ──────────────────────────────────────────────────────────── */
   return (
-    <div className="h-[calc(100vh-120px)] flex gap-0 min-h-0">
-      <div className="w-[360px] shrink-0 border border-slate-200 bg-white flex flex-col min-h-0 shadow-sm">
-        <div className="px-5 py-4 border-b border-slate-200 shrink-0 bg-white">
+    <div className="h-[calc(100vh-120px)] flex gap-0 min-h-0" style={{ fontFamily: "Inter, system-ui, sans-serif" }}>
+
+      {/* ═══════════════════ LEFT PANEL ════════════════════════════════════ */}
+      <div className="w-[340px] shrink-0 border border-slate-200 bg-white flex flex-col min-h-0 shadow-sm">
+        {/* Header */}
+        <div className="px-4 py-3 border-b border-slate-200 shrink-0 bg-white">
           <div className="flex items-center gap-2 mb-3">
-            <AlertTriangle size={16} className="text-red-500" />
-            <span className="text-xs font-mono font-bold uppercase tracking-widest text-slate-500">
-              Crisis Center · {incidents.length}
+            <div className="flex items-center gap-1.5">
+              <Radio size={13} className="text-red-500" />
+              <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">
+                Crisis Center
+              </span>
+            </div>
+            <span className="ml-auto text-[10px] font-mono font-bold bg-red-50 text-red-600 border border-red-100 px-1.5 py-0.5 rounded">
+              {incidents.length} active
             </span>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {statuses.map((s) => (
+
+          {/* Search */}
+          <div className="relative mb-3">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search incidents…"
+              className="w-full pl-8 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:border-slate-400 font-medium text-slate-700"
+            />
+          </div>
+
+          {/* Status filters */}
+          <div className="flex flex-wrap gap-1.5">
+            {["ACTIVE", "", "AWAITING_APPROVAL", "ANALYZED", "APPROVED", "RESOLVED", "DISMISSED"].map((s) => (
               <button
                 key={s || "all"}
                 onClick={() => setStatusFilter(s)}
-                className={`text-[10px] sm:text-xs font-mono font-bold uppercase tracking-widest px-2.5 py-1 transition-colors rounded ${
-                  statusFilter === s
-                    ? "bg-red-50 text-red-600 border border-red-200"
-                    : "bg-slate-100 text-slate-500 hover:text-slate-900"
-                }`}
+                className="text-[9px] font-mono font-bold uppercase tracking-wider px-2 py-1 rounded transition-all"
+                style={{
+                  background: statusFilter === s ? "#fef2f2" : "#f8fafc",
+                  color: statusFilter === s ? "#dc2626" : "#94a3b8",
+                  border: `1px solid ${statusFilter === s ? "#fecaca" : "#e2e8f0"}`,
+                }}
               >
                 {s || "ALL"}
               </button>
@@ -236,604 +373,522 @@ const Incidents = () => {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar divide-y divide-slate-200/60">
+        {/* List */}
+        <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
           {incidents.length === 0 && (
-            <div className="p-8 text-center text-slate-400 text-sm font-mono font-medium">
-              No active incidents found.
+            <div className="p-10 text-center text-slate-400 text-xs font-mono font-medium">
+              <AlertTriangle size={24} className="mx-auto mb-3 opacity-30" />
+              No incidents found.
             </div>
           )}
-
-          {incidents.map((incident: any) => {
-            const sev = SEVERITY[String(incident.severity)] || SEVERITY.LOW;
-            const isSelected = String(incident.id) === selectedId;
-            return (
-              <div
+          <AnimatePresence>
+            {incidents.map((incident: any) => (
+              <IncidentCard
                 key={String(incident.id)}
+                incident={incident}
+                isSelected={String(incident.id) === selectedId}
                 onClick={() => setSearchParams({ id: String(incident.id) })}
-                className={`px-5 py-4 cursor-pointer transition-all border-l-[3px] ${
-                  isSelected
-                    ? "bg-slate-50 border-l-red-500"
-                    : "hover:bg-slate-50 border-l-transparent"
-                }`}
-              >
-                <div className="flex items-center gap-3 mb-2">
-                  <span className={`${sev.text} text-base`}>{sev.icon}</span>
-                  <span className="text-sm font-bold text-slate-900 truncate flex-1 tracking-wide">
-                    {String(incident.event_title || "Disruption")}
-                  </span>
-                  <span className="text-[10px] sm:text-xs font-mono font-bold text-slate-400">
-                    {new Date(String(incident.created_at)).toLocaleDateString()}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 pl-[26px] mb-1.5">
-                  <span className={`text-[9px] font-mono font-bold uppercase px-1.5 py-0.5 rounded border ${incidentCategoryColor(incident)}`}>
-                    {incidentCategoryLabel(incident)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-4 text-xs font-mono font-bold text-slate-400 pl-[26px]">
-                  <span className="text-red-500">{Number(incident.affected_node_count || 0)} nodes</span>
-                  <span>{fmtINR(Number(incident.total_exposure_usd || 0))}</span>
-                </div>
-              </div>
-            );
-          })}
+              />
+            ))}
+          </AnimatePresence>
         </div>
       </div>
 
-      <div className="flex-1 border border-l-0 border-slate-200 bg-white flex flex-col min-h-0 overflow-y-auto custom-scrollbar shadow-inner">
+      {/* ═══════════════════ RIGHT PANEL ═══════════════════════════════════ */}
+      <div className="flex-1 border border-l-0 border-slate-200 bg-white flex flex-col min-h-0">
         {!selectedId ? (
-          <div className="flex-1 flex items-center justify-center text-slate-400 font-mono text-sm font-bold">
-            Select an incident to review orchestration logic.
+          <div className="flex-1 flex flex-col items-center justify-center text-slate-400 gap-3">
+            <Radio size={36} className="opacity-20" />
+            <p className="font-mono text-sm font-bold">Select an incident to begin.</p>
           </div>
         ) : !detail ? (
-          <div className="flex-1 flex items-center justify-center text-slate-400 font-mono text-sm font-bold uppercase tracking-widest">
-            Fetching incident detail...
+          <div className="flex-1 flex items-center justify-center gap-3 text-slate-400">
+            <Loader2 size={18} className="animate-spin" />
+            <span className="font-mono text-sm font-bold">Loading…</span>
           </div>
         ) : (
-          <div className="p-5 space-y-4">
-            <div>
-              <div className="flex items-center gap-3 mb-3">
-                <span
-                  className={`text-xs font-mono font-bold uppercase tracking-widest px-2.5 py-1 rounded border shadow-sm ${
-                    (SEVERITY[String(detail.severity)] || SEVERITY.LOW).bg
-                  } ${(SEVERITY[String(detail.severity)] || SEVERITY.LOW).text}`}
-                >
-                  {String(detail.severity)}
-                </span>
-                <span className={`text-xs font-mono font-bold uppercase px-2.5 py-1 rounded border shadow-sm ${incidentCategoryColor(detail as unknown as Record<string, unknown>)}`}>
-                  {incidentCategoryLabel(detail as unknown as Record<string, unknown>)}
-                </span>
-                <span
-                  className={`text-xs font-mono font-bold uppercase px-2.5 py-1 rounded shadow-sm ${
-                    STATUS_COLORS[String(detail.status)] || ""
-                  }`}
-                >
-                  {String(detail.status || "").replace(/_/g, " ")}
-                </span>
-                {detail.pipeline_ms && Number(detail.pipeline_ms) > 0 && (
-                  <span className="text-xs font-mono font-bold text-slate-400 ml-auto flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded border border-slate-200">
-                    <Zap size={12} className="text-red-500" />
-                    Pipeline: {Number(detail.pipeline_ms).toFixed(0)}ms
+          <div className="flex flex-col h-full min-h-0">
+
+            {/* ── Sticky header + action bar ─────────────────────────────── */}
+            <div className="shrink-0 border-b border-slate-200" style={{ background: "#fff", boxShadow: "0 1px 4px rgba(0,0,0,.06)" }}>
+              {/* Title row */}
+              <div className="px-6 pt-5 pb-3">
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  {/* Severity badge */}
+                  <span className="text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-md border"
+                    style={{ color: sevMeta.color, background: sevMeta.bg, borderColor: sevMeta.border }}>
+                    {String(detail.severity)}
                   </span>
-                )}
-              </div>
-              <h2 className="font-headline text-2xl font-bold uppercase tracking-tight text-slate-900">
-                {String(detail.event_title || "Disruption")}
-              </h2>
-              <p className="text-base text-slate-600 mt-2 leading-relaxed font-medium">
-                {String(detail.event_description || "")}
-              </p>
-              <div className="flex items-center gap-4 mt-3 text-sm font-mono font-bold text-slate-400">
-                <span>Detected: {detail.created_at ? new Date(String(detail.created_at)).toLocaleString() : "—"}</span>
-                {detail.source_url && (
-                  <a
-                    href={String(detail.source_url).startsWith('http') ? String(detail.source_url) : `https://${String(detail.source_url)}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 text-red-500 hover:underline font-bold"
-                  >
-                    <ExternalLink size={12} /> Source
-                  </a>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-4 gap-2">
-              {[
-                {
-                  label: "Exposure",
-                  value: fmtINR(Number(detail.total_exposure_usd || 0)),
-                  icon: IndianRupee,
-                  color: "text-red-500",
-                },
-                {
-                  label: "Stockout",
-                  value: `${Number(detail.min_stockout_days || 0).toFixed(1)} days`,
-                  icon: Clock,
-                  color: Number(detail.min_stockout_days || 999) <= 5 ? "text-red-500" : "text-yellow-600",
-                },
-                {
-                  label: "Praecantator Confidence",
-                  value: `${(Number(detail.gnn_confidence || 0) * 100).toFixed(0)}%`,
-                  icon: Shield,
-                  color: "text-blue-600",
-                },
-              ].map((metric) => (
-                <div key={metric.label} className="border border-slate-200 bg-white p-4 rounded shadow-sm">
-                  <div className="flex items-center gap-2 mb-2">
-                    <metric.icon size={12} className="text-slate-400" />
-                    <span className="text-xs font-mono font-bold text-slate-400 uppercase tracking-widest">
-                      {metric.label}
+                  {/* Status badge with pulse */}
+                  <span className="flex items-center gap-1.5 text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-md border"
+                    style={{ color: statusMeta.text, background: statusMeta.bg, borderColor: statusMeta.border }}>
+                    <PulseDot color={statusMeta.dot} active={detail.status === "AWAITING_APPROVAL"} />
+                    {statusMeta.label}
+                  </span>
+                  {/* Category */}
+                  <span className={`text-[10px] font-mono font-bold uppercase px-2.5 py-1 rounded-md border ${incidentCategoryColor(detail as unknown as Record<string, unknown>)}`}>
+                    {incidentCategoryLabel(detail as unknown as Record<string, unknown>)}
+                  </span>
+                  {detail.pipeline_ms && Number(detail.pipeline_ms) > 0 && (
+                    <span className="ml-auto text-[10px] font-mono font-bold text-slate-400 flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded border border-slate-200">
+                      <Zap size={10} className="text-amber-500" />
+                      Pipeline {Number(detail.pipeline_ms).toFixed(0)}ms
                     </span>
-                  </div>
-                  <div className={`text-xl font-bold font-headline tracking-wide ${metric.color}`}>
-                    {metric.value}
-                  </div>
+                  )}
                 </div>
-              ))}
-            </div>
+                <h2 className="font-headline text-xl font-bold text-slate-900 leading-tight mb-1">
+                  {String(detail.event_title || "Disruption")}
+                </h2>
+                <div className="flex items-center gap-4 text-[10px] font-mono text-slate-400">
+                  <span>Detected {detail.created_at ? timeAgo(String(detail.created_at)) : "—"}</span>
+                  {detail.source_url && (
+                    <a href={String(detail.source_url).startsWith("http") ? String(detail.source_url) : `https://${detail.source_url}`}
+                      target="_blank" rel="noopener noreferrer"
+                      className="flex items-center gap-1 text-red-500 hover:underline font-bold">
+                      <ExternalLink size={10} /> Source
+                    </a>
+                  )}
+                </div>
+              </div>
 
-            <div className="border border-slate-200 p-5 rounded bg-slate-50 shadow-inner">
-              <p className="text-xs font-mono font-bold uppercase tracking-widest text-slate-400 mb-4">
-                Affected Nodes · Praecantator-Scored
-              </p>
-              <div className="space-y-3 max-h-52 overflow-y-auto custom-scrollbar">
-                {(detail.affected_nodes || []).map((node, i) => {
-                  const score = Number(node.risk_score || 0);
-                  return (
-                    <div
-                      key={`${node.id}-${i}`}
-                      className="flex items-center gap-4 py-3 px-4 bg-white border border-slate-200 shadow-sm rounded"
-                    >
-                      <div
-                        className="w-2.5 h-2.5 shrink-0 rounded-full"
-                        style={{
-                          backgroundColor: score >= 0.8 ? "#DC2626" : score >= 0.6 ? "#ea580c" : "#16a34a",
-                          boxShadow: `0 0 6px ${score >= 0.8 ? "#DC2626" : score >= 0.6 ? "#ea580c" : "#16a34a"}`,
-                        }}
-                      />
-                      <div className="flex-1 min-w-0">
-                        <span className="text-sm text-slate-900 font-bold tracking-wide truncate block">
-                          {String(node.name || "Node")}
-                          {Boolean(node.single_source) && (
-                            <span className="text-[10px] sm:text-xs ml-2 text-red-600 font-mono font-bold bg-red-50 border border-red-100 px-1.5 py-0.5 rounded shadow-sm uppercase tracking-wider">
-                              Sole Source
-                            </span>
-                          )}
-                        </span>
-                        <span className="text-xs font-mono font-bold text-slate-500 mt-1 block">
-                          Tier {Number(node.tier || 1)} · {String(node.country || "—")}
-                        </span>
-                      </div>
-                      <div className="text-right shrink-0">
-                        <div className="text-sm font-bold" style={{ color: score >= 0.8 ? "#DC2626" : score >= 0.6 ? "#ea580c" : "#16a34a" }}>
-                          {(score * 100).toFixed(0)}%
-                        </div>
-                        <div className="text-xs font-mono font-bold text-slate-500 mt-1">
-                          {fmtINR(Number(node.exposure_usd || 0))}
-                        </div>
-                      </div>
+              {/* KPI strip */}
+              <div className="grid grid-cols-3 gap-0 border-t border-slate-100">
+                {[
+                  { label: "Exposure", value: fmtINR(Number(detail.total_exposure_usd || 0)), icon: IndianRupee, color: "#dc2626", critical: true },
+                  { label: "Stockout", value: `${Number(detail.min_stockout_days || 0).toFixed(1)}d`, icon: Clock, color: Number(detail.min_stockout_days || 999) <= 5 ? "#dc2626" : "#d97706", critical: Number(detail.min_stockout_days || 999) <= 5 },
+                  { label: "AI Confidence", value: `${(Number(detail.gnn_confidence || 0) * 100).toFixed(0)}%`, icon: Shield, color: "#2563eb", critical: false },
+                ].map((m) => (
+                  <div key={m.label} className="px-5 py-3 border-l border-slate-100 first:border-l-0">
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <m.icon size={10} className="text-slate-400" />
+                      <span className="text-[9px] font-mono font-bold uppercase tracking-widest text-slate-400">{m.label}</span>
                     </div>
+                    <div className="text-lg font-bold" style={{ color: m.color }}>{m.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Action bar */}
+              {canAct && (
+                <div className="px-6 py-3 bg-slate-50 border-t border-slate-200 flex items-center gap-3">
+                  <span className="text-[10px] font-mono font-bold text-slate-500 uppercase tracking-widest mr-2">Action Required</span>
+                  <button
+                    onClick={() => action.mutate({ id: String(detail.id), action: "approve" })}
+                    disabled={action.isPending || approveLoading}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-white uppercase tracking-widest transition-all disabled:opacity-50 shadow-sm"
+                    style={{ background: "#16a34a" }}
+                  >
+                    {approveLoading ? <><Loader2 size={12} className="animate-spin" /> Executing…</> : <><Check size={12} /> Approve & Execute</>}
+                  </button>
+                  <button
+                    onClick={() => action.mutate({ id: String(detail.id), action: "override", reason: "Manual override" })}
+                    disabled={action.isPending}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-slate-700 uppercase tracking-widest border border-slate-200 bg-white hover:bg-slate-50 transition-colors"
+                  >
+                    <Edit size={12} /> Override
+                  </button>
+                  <button
+                    onClick={() => setShowDismissDialog(true)}
+                    disabled={action.isPending}
+                    className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold text-slate-400 uppercase tracking-widest border border-slate-200 bg-white hover:bg-slate-50 transition-colors ml-auto"
+                  >
+                    <X size={12} /> Dismiss
+                  </button>
+                </div>
+              )}
+
+              {/* Tab navigation */}
+              <div className="flex border-t border-slate-200 px-6 bg-white">
+                {TABS.map((tab) => {
+                  const Icon = tab.icon;
+                  const active = activeTab === tab.id;
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setActiveTab(tab.id)}
+                      className="flex items-center gap-1.5 px-3 py-3 text-xs font-bold uppercase tracking-widest transition-all border-b-2 mr-1"
+                      style={{
+                        borderBottomColor: active ? "#dc2626" : "transparent",
+                        color: active ? "#dc2626" : "#94a3b8",
+                      }}
+                    >
+                      <Icon size={12} />
+                      {tab.label}
+                    </button>
                   );
                 })}
               </div>
             </div>
 
-              <div className="border border-slate-200 p-5 rounded bg-slate-50 shadow-inner">
-                <p className="text-xs font-mono font-bold uppercase tracking-widest text-slate-400 mb-4">
-                  Recommended Response
-                </p>
+            {/* ── Tab content ─────────────────────────────────────────────── */}
+            <div ref={detailPanelRef} className="flex-1 overflow-y-auto custom-scrollbar">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={activeTab}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -8 }}
+                  transition={{ duration: 0.18 }}
+                  className="p-6 space-y-5"
+                >
 
-                {(() => {
-                  // ── Country centroid fallback (used when nodes have no / same coords) ──
-                  const COUNTRY_CENTROIDS: Record<string, [number, number]> = {
-                    IN: [20.59, 78.96], CN: [35.86, 104.19], US: [37.09, -95.71], DE: [51.16, 10.45],
-                    GB: [55.37, -3.43], JP: [36.20, 138.25], KR: [35.90, 127.86], SG: [1.35, 103.82],
-                    AE: [23.42, 53.84], SA: [23.88, 45.08], AU: [-25.27, 133.77], BR: [-14.23, -51.92],
-                    FR: [46.22, 2.21], NL: [52.13, 5.29], MX: [23.63, -102.55], VN: [14.05, 108.27],
-                    TH: [15.87, 100.99], MY: [4.21, 101.97], ID: [-0.79, 113.92], PH: [12.88, 121.77],
-                    PK: [30.37, 69.34], BD: [23.68, 90.35], TW: [23.69, 120.96], HK: [22.39, 114.11],
-                    ZA: [-30.56, 22.93], NG: [9.08, 8.67], EG: [26.82, 30.80], TR: [38.96, 35.24],
-                    PL: [51.92, 19.14], IT: [41.87, 12.56], ES: [40.46, -3.74], CA: [56.13, -106.35],
-                    RU: [61.52, 105.31], UA: [48.37, 31.16], IL: [31.04, 34.85], MA: [31.79, -7.09],
-                  };
-
-                  // ── Derive real origin from affected nodes ─────────────────
-                  const nodes = detail?.affected_nodes || [];
-
-                  // Origin: first affected node with valid lat/lng
-                  const originNode = nodes.find(n => n.lat != null && n.lng != null && (n.lat !== 0 || n.lng !== 0)) || nodes[0];
-                  let originLat = originNode?.lat ?? 0;
-                  let originLng = originNode?.lng ?? 0;
-                  const originLabel = originNode?.name || originNode?.country || "Origin";
-
-                  // If origin has no coords, use country centroid
-                  if (!originLat && !originLng && originNode?.country) {
-                    const cc = COUNTRY_CENTROIDS[String(originNode.country).toUpperCase().slice(0, 2)];
-                    if (cc) { originLat = cc[0]; originLng = cc[1]; }
-                  }
-
-                  // Destination: backup_supplier coords if present, else highest-exposure node that differs from origin
-                  let destLat = 0, destLng = 0, destLabel = "Destination";
-                  if (detail.backup_supplier) {
-                    if ((detail.backup_supplier as any).lat != null) {
-                      destLat = Number((detail.backup_supplier as any).lat);
-                      destLng = Number((detail.backup_supplier as any).lng);
-                    }
-                    destLabel = detail.backup_supplier.name || detail.backup_supplier.location || "Backup Supplier";
-                    // If backup supplier has no coords, try its location as country code
-                    if (!destLat && !destLng) {
-                      const loc = String(detail.backup_supplier.location || "").trim().toUpperCase().slice(0, 2);
-                      const cc = COUNTRY_CENTROIDS[loc];
-                      if (cc) { destLat = cc[0]; destLng = cc[1]; }
-                    }
-                  } else {
-                    // Pick the node with highest exposure that is geographically different from origin
-                    const sorted = [...nodes]
-                      .filter(n => n.lat != null && n.lng != null)
-                      .sort((a, b) => Number(b.exposure_usd || 0) - Number(a.exposure_usd || 0));
-                    const destNode = sorted.find(n => n.id !== originNode?.id) || sorted[1] || null;
-                    if (destNode) {
-                      destLat = destNode.lat ?? 0;
-                      destLng = destNode.lng ?? 0;
-                      destLabel = destNode.name || destNode.country || "Destination";
-                    }
-                  }
-
-                  // If dest still has no coords, fall back to a different country centroid
-                  if (!destLat && !destLng) {
-                    // Use the country of the backup_supplier or the second affected node's country
-                    const fallbackCountry = (detail.backup_supplier?.location || nodes[1]?.country || "SG")
-                      .toString().trim().toUpperCase().slice(0, 2);
-                    const cc = COUNTRY_CENTROIDS[fallbackCountry] || COUNTRY_CENTROIDS["SG"]!;
-                    destLat = cc[0]; destLng = cc[1];
-                  }
-
-                  // ── Haversine from real coordinates ──────────────────────
-                  function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-                    if (lat1 === lat2 && lon1 === lon2) return 0;
-                    const R = 6371, r = Math.PI / 180;
-                    const dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
-                    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
-                    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                  }
-
-                  let dist = haversineKm(originLat, originLng, destLat, destLng);
-
-                  // If same coords (nodes are co-located), synthesise a plausible intra-country distance
-                  if (dist < 1) {
-                    // Pick a different centroid as destination — nearest major hub
-                    const altOrder = ["SG", "AE", "NL", "US", "JP", "DE", "AU"];
-                    const originCC = String(originNode?.country || "").toUpperCase().slice(0, 2);
-                    const altKey = altOrder.find(k => k !== originCC) || "SG";
-                    const alt = COUNTRY_CENTROIDS[altKey]!;
-                    destLat = alt[0]; destLng = alt[1]; destLabel = altKey + " Hub";
-                    dist = haversineKm(originLat, originLng, destLat, destLng);
-                  }
-
-                  // Speed / cost constants (industry averages)
-                  const AIR_KMH = 800, AIR_USD_PER_KM = 0.95;
-                  const LAND_KMH = 80, LAND_USD_PER_KM = 0.18;
-                  const SEA_KMH = 35, SEA_USD_PER_KM = 0.05;
-                  const LAND_MAX_KM = 3000; // viability cap
-
-                  const airDist = dist, airDays = dist > 0 ? (dist / AIR_KMH) / 24 : 0, airCost = dist * AIR_USD_PER_KM;
-                  const landDist = dist, landDays = dist > 0 ? (dist / LAND_KMH) / 24 : 0, landCost = dist * LAND_USD_PER_KM;
-                  const seaDist = dist * 1.25, seaDays = dist > 0 ? (seaDist / SEA_KMH) / 24 : 0, seaCost = seaDist * SEA_USD_PER_KM;
-
-                  const fmtDist = Math.round(dist).toLocaleString();
-
-                  // Patch the recommendation_detail text that backend emits with "0km" placeholders
-                  let finalRecDetail = String(detail.recommendation_detail || "")
-                    .replace(/0km direct/gi, `${fmtDist} km direct`)
-                    .replace(/\b0\s*km\b/gi, `${fmtDist} km`)
-                    .replace(/\$0\/tonne/gi, airCost > 0 ? `${fmtINR(airCost)}/tonne` : "Cost TBD")
-                    .replace(/GNN confidence/gi, "Praecantator confidence");
-
-                  // Build RouteViewer URL with real lat/lng so the map renders the correct path
-                  function openRouteViewer(mode: string, days: number, cost: number) {
-                    const params = new URLSearchParams({
-                      mode,
-                      fromLat: String(originLat), fromLng: String(originLng), fromLabel: originLabel,
-                      toLat: String(destLat), toLng: String(destLng), toLabel: destLabel,
-                      cost: String(Math.round(cost)),
-                      days: String(days.toFixed(1)),
-                      incident: String(detail?.event_title || ""),
-                    });
-                    navigate(`/dashboard/route-viewer?${params.toString()}`);
-                  }
-
-                  return (
+                  {/* ══ OVERVIEW TAB ══════════════════════════════════════ */}
+                  {activeTab === "overview" && (
                     <>
-                      {/* ── Route header showing real origin → destination ── */}
-                      {dist > 0 && (
-                        <div className="flex items-center gap-2 mb-4 text-xs font-mono text-slate-500 bg-white border border-slate-200 rounded px-3 py-2 shadow-sm">
-                          <MapPin size={11} className="text-red-400 shrink-0" />
-                          <span className="truncate font-bold text-slate-700">{originLabel}</span>
-                          <span className="text-slate-300 shrink-0">→</span>
-                          <span className="truncate font-bold text-slate-700">{destLabel}</span>
-                          <span className="ml-auto shrink-0 font-bold text-slate-400">{Math.round(dist).toLocaleString()} km</span>
-                        </div>
-                      )}
-
-                      <div className="bg-red-50 border border-red-200 px-5 py-4 mb-4 rounded shadow-sm">
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="text-red-600 text-xs font-mono font-bold uppercase tracking-wide">
-                            ★ {String(detail.recommendation || "REVIEW")}
-                          </span>
-                        </div>
-                        <p className="text-sm text-slate-700 leading-relaxed font-semibold mt-1 whitespace-pre-line">
-                          {finalRecDetail}
+                      {/* Description */}
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-5">
+                        <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 mb-2">Event Description</p>
+                        <p className="text-sm text-slate-700 leading-relaxed font-medium">
+                          {String(detail.event_description || "No description available.")}
                         </p>
                       </div>
 
+                      {/* Recommendation */}
+                      <div className="border rounded-xl overflow-hidden" style={{ borderColor: sevMeta.border }}>
+                        <div className="px-5 py-3 flex items-center gap-2" style={{ background: sevMeta.bg }}>
+                          <Zap size={13} style={{ color: sevMeta.color }} />
+                          <span className="text-[10px] font-mono font-bold uppercase tracking-widest" style={{ color: sevMeta.color }}>
+                            AI Recommendation
+                          </span>
+                        </div>
+                        <div className="px-5 py-4 bg-white">
+                          <p className="text-sm font-bold text-slate-800 mb-2">★ {String(detail.recommendation || "Review required")}</p>
+                          <p className="text-sm text-slate-600 leading-relaxed">{String(detail.recommendation_detail || "")}</p>
+                        </div>
+                      </div>
+
+                      {/* Backup supplier */}
                       {detail.backup_supplier && (
-                        <div className="bg-emerald-50 border border-emerald-200 px-4 py-3 mb-4 rounded shadow-sm">
+                        <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-4">
                           <div className="flex items-center gap-2 mb-2">
-                            <Shield size={14} className="text-emerald-600" />
-                            <span className="text-xs font-mono font-bold text-emerald-600 uppercase tracking-widest">
-                              Backup Supplier
-                            </span>
+                            <Shield size={13} className="text-emerald-600" />
+                            <span className="text-[10px] font-mono font-bold text-emerald-600 uppercase tracking-widest">Backup Supplier Identified</span>
                           </div>
-                          <div className="mt-2 text-sm font-bold text-slate-900 font-headline">
+                          <div className="text-sm font-bold text-slate-900">
                             {String(detail.backup_supplier.name || "")}
                             <span className="text-emerald-600 font-mono text-xs ml-3 border-l border-emerald-200 pl-3">
                               {String(detail.backup_supplier.location || "")}
                             </span>
                           </div>
+                          {detail.backup_supplier.lead_time_days && (
+                            <div className="text-xs text-slate-500 mt-1 font-mono">
+                              Lead time: {detail.backup_supplier.lead_time_days} days
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      <div className="space-y-2">
+                      {/* Affected nodes */}
+                      <div>
+                        <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 mb-3">
+                          Affected Nodes · {nodes.length} Praecantator-Scored
+                        </p>
+                        <div className="space-y-2">
+                          {nodes.map((node, i) => {
+                            const score = Number(node.risk_score || 0);
+                            const nodeColor = score >= 0.8 ? "#dc2626" : score >= 0.6 ? "#ea580c" : "#16a34a";
+                            return (
+                              <div key={`${node.id}-${i}`} className="flex items-center gap-4 py-3 px-4 bg-white border border-slate-200 shadow-sm rounded-xl">
+                                <div className="w-2.5 h-2.5 shrink-0 rounded-full" style={{ backgroundColor: nodeColor, boxShadow: `0 0 6px ${nodeColor}` }} />
+                                <div className="flex-1 min-w-0">
+                                  <span className="text-sm text-slate-900 font-bold tracking-wide truncate block">
+                                    {String(node.name || "Node")}
+                                    {Boolean(node.single_source) && (
+                                      <span className="text-[9px] ml-2 text-red-600 font-mono font-bold bg-red-50 border border-red-100 px-1.5 py-0.5 rounded uppercase tracking-wider">Sole Source</span>
+                                    )}
+                                  </span>
+                                  <span className="text-[10px] font-mono font-bold text-slate-400 mt-0.5 block">
+                                    Tier {Number(node.tier || 1)} · {String(node.country || "—")}
+                                  </span>
+                                </div>
+                                <div className="text-right shrink-0">
+                                  <div className="text-sm font-bold" style={{ color: nodeColor }}>{(score * 100).toFixed(0)}%</div>
+                                  <div className="text-[10px] font-mono text-slate-400">{fmtINR(Number(node.exposure_usd || 0))}</div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <CheckpointBanner incidentId={String(detail.id)} />
+                      <ReasoningPanel workflowId={String(detail.id)} />
+                      <GovernanceFeedbackWidget incidentId={String(detail.id)} status={String(detail.status)} />
+
+                      {/* Status banners */}
+                      {detail.status === "RESOLVED" && !executionResult && !(detail.execution_timeline?.length) && (
+                        <div className="bg-emerald-50 border border-emerald-200 px-5 py-4 rounded-xl flex items-center gap-2">
+                          <CheckCircle size={15} className="text-emerald-500" />
+                          <p className="text-emerald-700 text-sm font-semibold">
+                            Resolved by {String(detail.approved_by || "system")} at {detail.resolved_at ? new Date(String(detail.resolved_at)).toLocaleString() : "—"}
+                          </p>
+                        </div>
+                      )}
+                      {detail.status === "APPROVED" && (
+                        <div className="bg-green-50 border border-green-200 px-5 py-4 rounded-xl flex items-center gap-2">
+                          <Check size={15} className="text-green-600" />
+                          <p className="text-green-700 text-sm font-semibold">
+                            Approved by {String(detail.approved_by || "user")} at {detail.approved_at ? new Date(String(detail.approved_at)).toLocaleString() : "—"}
+                          </p>
+                        </div>
+                      )}
+                      {detail.status === "DISMISSED" && (
+                        <div className="bg-slate-50 border border-slate-200 px-5 py-4 rounded-xl">
+                          <p className="text-slate-500 text-sm font-semibold text-center">
+                            Dismissed: {String(detail.dismiss_reason || "No reason given")}
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ══ ROUTES TAB ════════════════════════════════════════ */}
+                  {activeTab === "routes" && (
+                    <>
+                      {/* Route origin/dest strip */}
+                      {dist > 0 && (
+                        <div className="flex items-center gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 shadow-sm">
+                          <MapPin size={12} className="text-red-400 shrink-0" />
+                          <span className="text-sm font-bold text-slate-700 truncate">{originLabel}</span>
+                          <ArrowRight size={14} className="text-slate-300 shrink-0" />
+                          <span className="text-sm font-bold text-slate-700 truncate">{destLabel}</span>
+                          <span className="ml-auto shrink-0 text-xs font-mono font-bold text-slate-400">{Math.round(dist).toLocaleString()} km</span>
+                        </div>
+                      )}
+
+                      {/* Route cards */}
+                      <div className="space-y-3">
                         {(detail.route_options || []).map((route, i) => {
-                          const ModeIcon = MODE_ICONS[String(route.mode)] || Truck;
+                          const mode = String(route.mode) as keyof typeof MODE_ICONS;
+                          const ModeIcon = MODE_ICONS[mode] || Truck;
+                          const modeColor = MODE_COLOR[mode] || "#64748b";
                           const isRec = Boolean(route.recommended);
-                          const mode = String(route.mode);
+                          const isViable = mode !== "land" || dist <= 6000;
 
-                          // Derive distance/days/cost from real coordinates, fallback to backend values
                           let routeDist = 0, routeDays = 0, routeCost = 0;
-                          if (mode === "air")  { routeDist = airDist;  routeDays = airDays;  routeCost = airCost;  }
-                          if (mode === "land") { routeDist = landDist; routeDays = landDays; routeCost = landCost; }
-                          if (mode === "sea")  { routeDist = seaDist;  routeDays = seaDays;  routeCost = seaCost;  }
-
-                          // If backend already has non-zero values, prefer them
+                          if (mode === "air")  { routeDist = dist; routeDays = airDays; routeCost = airCost; }
+                          if (mode === "sea")  { routeDist = seaDist; routeDays = seaDays; routeCost = seaCost; }
+                          if (mode === "land") { routeDist = dist; routeDays = landDays; routeCost = landCost; }
+                          if (mode === "hybrid") { routeDist = dist; routeDays = (seaDays + landDays) / 2; routeCost = seaCost * 0.7 + landCost * 0.3; }
                           if (Number(route.transit_days) > 0) routeDays = Number(route.transit_days);
-                          if (Number(route.cost_usd) > 0)     routeCost = Number(route.cost_usd);
+                          if (Number(route.cost_usd) > 0) routeCost = Number(route.cost_usd);
 
-                          const isViable = mode !== "land" || routeDist <= LAND_MAX_KM;
-                          const routeFmtDist = Math.round(routeDist).toLocaleString();
-                          // Always replace 0km placeholders with real computed distance
                           const finalDesc = isViable
-                            ? String(route.description || "")
-                                .replace(/0km direct/gi, `${routeFmtDist} km direct`)
-                                .replace(/\b0\s*km\b/gi, `${routeFmtDist} km`)
-                                .replace(/\btbd\s*km\b/gi, `${routeFmtDist} km`)
-                            : "Not viable — no road/rail corridor between origin and destination";
+                            ? String(route.description || "").replace(/0km direct/gi, `${Math.round(routeDist).toLocaleString()} km direct`).replace(/\b0\s*km\b/gi, `${Math.round(routeDist).toLocaleString()} km`)
+                            : "Not viable — no road corridor between these coordinates";
+
+                          // CO2 estimates
+                          const co2 = { air: 0.602, sea: 0.012, land: 0.096, hybrid: 0.045 }[mode] ?? 0.1;
+                          const co2Kg = Math.round(routeDist * 5 * co2);
 
                           return (
-                            <div
+                            <motion.div
                               key={`${mode}-${i}`}
+                              whileHover={isViable ? { scale: 1.01, boxShadow: "0 4px 20px rgba(0,0,0,.10)" } : {}}
+                              whileTap={isViable ? { scale: 0.99 } : {}}
                               onClick={isViable ? () => openRouteViewer(mode, routeDays, routeCost) : undefined}
-                              className={`flex items-center gap-4 px-4 py-3.5 rounded border transition-all ${
-                                isRec ? "border-red-200 bg-red-50/50 shadow-sm" : "border-slate-200 bg-white"
-                              } ${isViable ? "cursor-pointer hover:shadow-md hover:border-slate-300 active:scale-[0.99]" : "opacity-60"}`}
+                              className="rounded-xl border overflow-hidden transition-all"
+                              style={{
+                                borderColor: isRec ? modeColor : "#e2e8f0",
+                                opacity: isViable ? 1 : 0.5,
+                                cursor: isViable ? "pointer" : "default",
+                              }}
                             >
-                              <ModeIcon size={18} className={isRec ? "text-red-500" : "text-slate-400"} />
-                              <div className="flex-1 min-w-0">
-                                <span className={`text-sm font-bold block tracking-wide ${isRec ? "text-slate-900" : "text-slate-700"}`}>
-                                  {isViable ? finalDesc : <span className="text-slate-400">{finalDesc}</span>}
-                                </span>
+                              {/* Card header */}
+                              <div className="flex items-center gap-3 px-4 py-3" style={{ background: isRec ? `${modeColor}12` : "#f8fafc" }}>
+                                <div className="flex items-center justify-center w-8 h-8 rounded-lg" style={{ background: modeColor + "20" }}>
+                                  <ModeIcon size={16} style={{ color: modeColor }} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-sm font-bold text-slate-800 capitalize">{mode === "hybrid" ? "Hybrid (Sea + Land)" : mode} Freight</span>
+                                    {isRec && (
+                                      <span className="text-[9px] font-mono font-bold uppercase px-2 py-0.5 rounded" style={{ color: modeColor, background: modeColor + "18", border: `1px solid ${modeColor}40` }}>
+                                        ★ Recommended
+                                      </span>
+                                    )}
+                                    {!isViable && <span className="text-[9px] font-mono text-slate-400 uppercase">N/A</span>}
+                                  </div>
+                                  <p className="text-xs text-slate-500 truncate mt-0.5">{isViable ? finalDesc : "Route not viable"}</p>
+                                </div>
                                 {isViable && (
-                                  <span className="text-[10px] font-mono text-slate-400 mt-0.5 block">
-                                    Click to view route map
-                                  </span>
+                                  <ChevronRight size={16} className="text-slate-400 shrink-0" />
                                 )}
                               </div>
-                              <div className="text-right shrink-0 space-y-1 mr-4">
-                                {isViable && routeDays > 0 && (
-                                  <div className="text-xs font-mono font-bold text-slate-500 flex items-center gap-1.5 justify-end">
-                                    <Clock size={12} className="text-slate-400" /> {routeDays.toFixed(1)}d
-                                  </div>
-                                )}
-                                {isViable && routeCost > 0 && (
-                                  <div className="text-xs font-mono font-bold text-slate-500 flex items-center gap-1.5 justify-end">
-                                    <IndianRupee size={12} className="text-slate-400" /> {fmtINR(routeCost)}
-                                  </div>
-                                )}
-                              </div>
-                              <span className={`text-[10px] sm:text-xs font-mono font-bold uppercase px-2.5 py-1 rounded shrink-0 shadow-sm ${
-                                isRec
-                                  ? "text-red-600 bg-red-100 border border-red-200"
-                                  : isViable
-                                    ? "text-blue-600 bg-blue-50 border border-blue-100"
-                                    : "text-slate-400 bg-slate-100 border border-slate-200"
-                              }`}>
-                                {isRec ? "REC" : isViable ? (route.status_label || mode.toUpperCase()) : "N/A"}
-                              </span>
-                            </div>
+
+                              {/* Card metrics */}
+                              {isViable && (
+                                <div className="grid grid-cols-4 divide-x divide-slate-100 bg-white">
+                                  {[
+                                    { label: "Distance", value: `${Math.round(routeDist).toLocaleString()} km`, icon: <MapPin size={10} /> },
+                                    { label: "Transit", value: routeDays > 0 ? `${routeDays.toFixed(1)}d` : "—", icon: <Clock size={10} /> },
+                                    { label: "Cost", value: routeCost > 0 ? fmtINR(routeCost) : "—", icon: <IndianRupee size={10} /> },
+                                    { label: "CO₂", value: co2Kg > 0 ? `${co2Kg.toLocaleString()} kg` : "—", icon: <Leaf size={10} /> },
+                                  ].map((m) => (
+                                    <div key={m.label} className="px-3 py-2.5 text-center">
+                                      <div className="flex items-center justify-center gap-1 text-slate-400 mb-1">{m.icon}<span className="text-[8px] font-mono uppercase font-bold tracking-wider">{m.label}</span></div>
+                                      <div className="text-xs font-bold text-slate-800">{m.value}</div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </motion.div>
                           );
                         })}
                       </div>
-                    </>
-                  );
-                })()}
-      </div>
 
-            {detail.rfq_draft && (
-              <div className="border border-slate-200 bg-white rounded shadow-sm overflow-hidden mb-4">
-                <div className="w-full flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-100">
-                  <div className="flex items-center gap-2">
-                    <Send size={12} className="text-blue-500" />
-                    <span className="text-xs font-mono font-bold uppercase tracking-widest text-slate-500">
-                      Draft RFQ · AI AGENT
-                    </span>
-                  </div>
-                </div>
-                <div className="px-5 pb-5 space-y-3 text-sm bg-slate-50 pt-4">
-                        <div className="flex items-baseline">
-                          <span className="text-slate-400 font-mono font-bold w-16">To:</span>
-                          <span className="text-slate-900 font-bold">{String(detail.rfq_draft.to || "—")}</span>
-                        </div>
-                        <div className="flex items-baseline">
-                          <span className="text-slate-400 font-mono font-bold w-16">Subject:</span>
-                          <span className="text-slate-900 font-bold font-headline">{String(detail.rfq_draft.subject || "—")}</span>
-                        </div>
-                        <pre className="text-sm text-slate-700 bg-white border border-slate-200 p-4 rounded whitespace-pre-wrap font-mono leading-relaxed max-h-[400px] overflow-y-auto custom-scrollbar font-medium">
-                          {String(detail.rfq_draft.body || "")}
-                        </pre>
-                        <div className="flex justify-end gap-3 pt-2">
-                          <button
-                            type="button"
-                            className="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-slate-900 font-mono text-xs uppercase tracking-widest transition-colors rounded shadow-sm font-bold"
-                          >
-                            Edit Case
-                          </button>
-                          <button
-                            type="button"
-                            className="px-4 py-2 bg-red-500 text-white hover:bg-red-600 font-mono text-xs uppercase tracking-widest transition-colors rounded shadow-sm font-bold"
-                          >
-                            Send RFQ
-                          </button>
-                        </div>
-                </div>
-              </div>
-            )}
-
-            <CheckpointBanner incidentId={String(detail.id)} />
-            <ReasoningPanel workflowId={String(detail.id)} />
-            {/* ── Execution Timeline (shows after approval) ── */}
-            {(((executionResult?.execution_timeline || detail.execution_timeline || []) as any[]).length > 0) && (
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                className="border border-emerald-500/30 bg-emerald-500/5 p-4"
-              >
-                <div className="flex items-center gap-3 mb-4">
-                  <CheckCircle size={16} className="text-emerald-500" />
-                  <span className="text-xs font-mono font-bold uppercase tracking-widest text-emerald-400">
-                    Execution Complete
-                  </span>
-                  {(executionResult?.awb_reference || detail.awb_reference) && (
-                    <span className="ml-auto text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded">
-                      {String(executionResult?.awb_reference || detail.awb_reference)}
-                    </span>
-                  )}
-                </div>
-                <div className="space-y-0">
-                  {(((executionResult?.execution_timeline || detail.execution_timeline || []) as any[])).map(
-                    (step: any, i: number) => (
-                      <motion.div
-                        key={i}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: i * 0.15 }}
-                        className="flex items-start gap-3 py-2"
-                      >
-                        <div className="flex flex-col items-center mt-0.5">
-                           <CheckCircle size={12} className="text-emerald-500" />
-                           {i < ((executionResult?.execution_timeline || detail.execution_timeline || []) as any[]).length - 1 && (
-                             <div className="w-px h-full min-h-[16px] bg-emerald-500/30 mt-1" />
-                           )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-3">
-                            <span className="text-sm font-bold text-gray-100">
-                              {String(step.action || "")}
-                            </span>
-                            <span className="text-xs font-mono text-emerald-400 font-bold">
-                              {String(step.time || "")}
-                            </span>
-                          </div>
-                          <p className="text-sm text-gray-300 mt-1 leading-relaxed">
-                            {String(step.detail || "")}
+                      {/* Hybrid explainer */}
+                      {detail.route_options?.some(r => r.mode === "hybrid" || r.recommended) && (
+                        <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3">
+                          <p className="text-[10px] font-mono font-bold text-violet-600 uppercase tracking-widest mb-1">About Hybrid Routes</p>
+                          <p className="text-xs text-violet-700 leading-relaxed">
+                            Hybrid routes combine sea freight (~70% of distance) for cost savings with land/rail for the final leg, balancing transit time and cost where road-only corridors are not viable.
                           </p>
                         </div>
-                      </motion.div>
-                    )
-                  )}
-                </div>
-              </motion.div>
-            )}
-
-            {/* ── Post-status banners ── */}
-            {detail.status === "RESOLVED" && !executionResult && !(detail.execution_timeline && detail.execution_timeline.length > 0) && (
-              <div className="bg-emerald-500/10 border border-emerald-500/30 px-5 py-4 rounded">
-                <p className="text-emerald-400 text-sm font-mono font-semibold flex items-center gap-2">
-                  <CheckCircle size={16} />
-                  Resolved by {String(detail.approved_by || "system")} at{" "}
-                  {detail.resolved_at ? new Date(String(detail.resolved_at)).toLocaleString() : "—"}
-                </p>
-              </div>
-            )}
-
-            {detail.status === "APPROVED" && (
-              <div className="bg-green-500/10 border border-green-500/30 px-5 py-4 rounded">
-                <p className="text-green-400 text-sm font-mono font-semibold flex items-center gap-2">
-                  <Check size={16} />
-                  Approved by {String(detail.approved_by || "user")} at{" "}
-                  {detail.approved_at ? new Date(String(detail.approved_at)).toLocaleString() : "—"}
-                </p>
-              </div>
-            )}
-
-            {detail.status === "DISMISSED" && (
-              <div className="bg-surface-high border border-border/50 px-5 py-4 rounded">
-                <p className="text-gray-400 text-sm font-mono font-semibold text-center">
-                  Dismissed: {String(detail.dismiss_reason || "No reason given")}
-                </p>
-              </div>
-            )}
-
-            {/* ── Governance Feedback Loop ── */}
-            <GovernanceFeedbackWidget
-              incidentId={String(detail.id)}
-              status={String(detail.status)}
-            />
-
-            {/* ── Action Buttons ── */}
-            {canExecuteIncident && (
-              <div className="flex items-center gap-3 pt-6 pb-4 border-t border-slate-200 mt-6">
-                <button
-                  onClick={() => action.mutate({ id: String(detail.id), action: "approve" })}
-                  disabled={action.isPending || approveLoading}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-green-600 hover:bg-green-700 text-white font-mono text-xs uppercase tracking-widest transition-all disabled:opacity-50 rounded shadow-sm"
-                >
-                  {approveLoading ? (
-                    <>
-                      <Loader2 size={14} className="animate-spin" />
-                      Executing...
-                    </>
-                  ) : (
-                    <>
-                      <Check size={14} />
-                      Approve & Execute
+                      )}
                     </>
                   )}
-                </button>
-                <button
-                  onClick={() => action.mutate({ id: String(detail.id), action: "override", reason: "Manual override" })}
-                  disabled={action.isPending}
-                  className="flex items-center gap-2 px-5 py-2.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 font-mono text-xs uppercase tracking-widest transition-colors rounded shadow-sm font-bold"
-                >
-                  <Edit size={14} />
-                  Override
-                </button>
-                <button
-                  onClick={() => {
-                    const reason = prompt("Reason for dismissal:");
-                    if (reason) action.mutate({ id: String(detail.id), action: "dismiss", reason });
-                  }}
-                  disabled={action.isPending}
-                  className="flex items-center gap-2 px-5 py-2.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-400 font-mono text-xs uppercase tracking-widest font-bold transition-colors rounded shadow-sm"
-                >
-                  <X size={14} />
-                  Dismiss
-                </button>
-              </div>
-            )}
+
+                  {/* ══ COMMUNICATION TAB ═════════════════════════════════ */}
+                  {activeTab === "communication" && (
+                    <>
+                      {detail.rfq_draft ? (
+                        <div className="border border-slate-200 bg-white rounded-xl overflow-hidden">
+                          <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
+                            <Send size={12} className="text-blue-500" />
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">AI-Drafted RFQ</span>
+                            <span className="ml-auto text-[9px] font-mono text-emerald-600 font-bold bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">AI Agent</span>
+                          </div>
+                          <div className="px-5 py-5 space-y-4">
+                            <div className="grid grid-cols-[80px_1fr] gap-y-2 text-sm">
+                              <span className="text-slate-400 font-mono font-bold pt-0.5">To:</span>
+                              <span className="text-slate-900 font-bold">{String(detail.rfq_draft.to || "—")}</span>
+                              <span className="text-slate-400 font-mono font-bold pt-0.5">Subject:</span>
+                              <span className="text-slate-900 font-bold">{String(detail.rfq_draft.subject || "—")}</span>
+                            </div>
+                            <pre className="text-xs text-slate-700 bg-slate-50 border border-slate-200 p-4 rounded-xl whitespace-pre-wrap font-mono leading-relaxed max-h-[300px] overflow-y-auto custom-scrollbar">
+                              {String(detail.rfq_draft.body || "")}
+                            </pre>
+                            <div className="flex justify-end gap-3">
+                              <button className="px-4 py-2 bg-white border border-slate-200 text-slate-600 hover:text-slate-900 font-mono text-xs uppercase tracking-widest rounded-lg shadow-sm font-bold transition-colors">
+                                Edit Draft
+                              </button>
+                              <button className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 font-mono text-xs uppercase tracking-widest rounded-lg shadow-sm font-bold transition-colors">
+                                <Send size={12} className="inline mr-1.5" />Send RFQ
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 text-slate-400">
+                          <MessageSquare size={28} className="mx-auto mb-3 opacity-30" />
+                          <p className="text-sm font-mono font-bold">No draft communication available.</p>
+                          <p className="text-xs mt-1">RFQ is auto-generated for CRITICAL and HIGH severity incidents.</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ══ TIMELINE TAB ══════════════════════════════════════ */}
+                  {activeTab === "timeline" && (
+                    <>
+                      {(((executionResult?.execution_timeline || detail.execution_timeline || []) as any[]).length > 0) ? (
+                        <div className="border border-emerald-200 bg-emerald-50 rounded-xl overflow-hidden">
+                          <div className="px-5 py-3 flex items-center gap-2 border-b border-emerald-100">
+                            <CheckCircle size={14} className="text-emerald-600" />
+                            <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-emerald-600">Execution Timeline</span>
+                            {(executionResult?.awb_reference || detail.awb_reference) && (
+                              <span className="ml-auto text-[10px] font-mono font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded">
+                                {String(executionResult?.awb_reference || detail.awb_reference)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="px-5 py-5 space-y-0">
+                            {(((executionResult?.execution_timeline || detail.execution_timeline || []) as any[])).map((step: any, i: number, arr: any[]) => (
+                              <motion.div
+                                key={i}
+                                initial={{ opacity: 0, x: -10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: i * 0.12 }}
+                                className="flex items-start gap-3 py-3"
+                              >
+                                <div className="flex flex-col items-center mt-0.5">
+                                  <CheckCircle size={14} className="text-emerald-600 shrink-0" />
+                                  {i < arr.length - 1 && <div className="w-px flex-1 min-h-[20px] bg-emerald-200 mt-1" />}
+                                </div>
+                                <div className="flex-1 min-w-0 pb-2">
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-sm font-bold text-slate-800">{String(step.action || "")}</span>
+                                    <span className="text-[10px] font-mono text-emerald-600 font-bold">{String(step.time || "")}</span>
+                                  </div>
+                                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">{String(step.detail || "")}</p>
+                                </div>
+                              </motion.div>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="text-center py-12 text-slate-400">
+                          <GitBranch size={28} className="mx-auto mb-3 opacity-30" />
+                          <p className="text-sm font-mono font-bold">No execution timeline yet.</p>
+                          <p className="text-xs mt-1">Timeline appears after the incident is approved and executed.</p>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                </motion.div>
+              </AnimatePresence>
+            </div>
           </div>
         )}
       </div>
+
+      {/* ── Dismiss dialog ─────────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showDismissDialog && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+            onClick={(e) => { if (e.target === e.currentTarget) setShowDismissDialog(false); }}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 10 }}
+              className="bg-white rounded-2xl shadow-2xl border border-slate-200 p-6 w-full max-w-sm mx-4"
+            >
+              <h3 className="font-bold text-slate-900 text-lg mb-1">Dismiss Incident</h3>
+              <p className="text-sm text-slate-500 mb-4">Please provide a reason for dismissal. This will be logged for audit.</p>
+              <textarea
+                value={dismissReason}
+                onChange={(e) => setDismissReason(e.target.value)}
+                placeholder="Reason for dismissal…"
+                rows={3}
+                className="w-full border border-slate-200 rounded-lg p-3 text-sm text-slate-700 resize-none focus:outline-none focus:border-slate-400"
+              />
+              <div className="flex gap-3 mt-4">
+                <button onClick={() => setShowDismissDialog(false)} className="flex-1 px-4 py-2.5 border border-slate-200 bg-white text-slate-600 font-bold text-sm rounded-xl hover:bg-slate-50">Cancel</button>
+                <button
+                  onClick={() => {
+                    if (dismissReason.trim()) {
+                      action.mutate({ id: String(detail?.id), action: "dismiss", reason: dismissReason.trim() });
+                      setShowDismissDialog(false);
+                      setDismissReason("");
+                    }
+                  }}
+                  disabled={!dismissReason.trim()}
+                  className="flex-1 px-4 py-2.5 bg-red-600 text-white font-bold text-sm rounded-xl hover:bg-red-700 disabled:opacity-40"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

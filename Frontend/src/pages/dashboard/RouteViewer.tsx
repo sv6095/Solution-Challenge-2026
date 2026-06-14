@@ -1,509 +1,620 @@
-import { useRef, useEffect, useMemo, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { ArrowLeft, Plane, Clock, MapPin, Navigation, Clock3, Truck, UserRound } from "lucide-react";
+import {
+  ArrowLeft, Plane, Ship, Truck, Clock, MapPin, Navigation,
+  Leaf, DollarSign, AlertTriangle, CheckCircle, Loader2, RefreshCw,
+} from "lucide-react";
 import { fmtINR } from "@/lib/currency";
-
 import { Map, MapRoute, MapControls, MapMarker, MarkerContent, MarkerTooltip, type MapRef } from "@/components/ui/map";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getAccessToken, getUserId } from "@/lib/api";
 
-/* ── Types ─────────────────────────────────────────────────────────── */
-type AP = { icao: string; iata: string; name: string; city: string; country: string; lat: number; lon: number; elevation?: number };
-type RouteOption = { label: string; legs: AP[]; distKm: number; hours: number; color: string; dash?: [number,number] };
+const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
-interface OsrmRouteData {
-  coordinates: [number, number][];
-  duration: number;
-  distance: number;
+function authHeaders(): HeadersInit {
+  const token = getAccessToken();
+  return {
+    "Content-Type": "application/json",
+    "X-User-Id": getUserId(),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
 }
 
-/* ── Haversine (ports project1.py distance()) ───────────────────────── */
-function hav(a: AP, b: AP) {
-  const R = 6371, r = Math.PI / 180;
-  const dLat = (b.lat - a.lat) * r, dLon = (b.lon - a.lon) * r;
-  const x = Math.sin(dLat/2)**2 + Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+/* ── Types ────────────────────────────────────────────────────────────────── */
+interface RouteCoords { coordinates: [number, number][]; distance_km: number; viable?: boolean; reason?: string; source?: string; source_label?: string; }
+interface AirRouteData {
+  direct: RouteCoords;
+  via_hubs: RouteCoords & { origin_hub?: HubAirport; dest_hub?: HubAirport };
+  via_alt_hub?: RouteCoords & { hub?: HubAirport };
+  source_label?: string;
+  airport_source?: string;
+  airport_count?: number;
+}
+interface HubAirport { iata: string; name: string; city: string; country?: string; lat: number; lng: number; }
+interface CostData {
+  total_usd: number; transit_days: number; co2_kg: number;
+  breakdown: Record<string, number>;
+  mode: string; distance_km: number;
 }
 
-/* ── Great-circle arc for MapRoute ─────────────────────────────────── */
-function arc(from: AP, to: AP, steps = 80): [number,number][] {
-  const r = Math.PI/180, d = 180/Math.PI;
-  const [lo1,la1,lo2,la2] = [from.lon*r, from.lat*r, to.lon*r, to.lat*r];
-  
-  // Calculate central angle Omega
-  let cosOmega = Math.sin(la1)*Math.sin(la2) + Math.cos(la1)*Math.cos(la2)*Math.cos(lo1-lo2);
-  // Clamp to avoid precision errors
-  cosOmega = Math.max(-1, Math.min(1, cosOmega));
-  const Omega = Math.acos(cosOmega);
-  
-  // If points are same or antipodal, fallback to straight line
-  if (Omega === 0 || Math.abs(Omega - Math.PI) < 1e-6) {
-    return [[from.lon, from.lat], [to.lon, to.lat]];
-  }
-
-  const sinOmega = Math.sin(Omega);
-  let prevLon: number | null = null;
-  let lonOffset = 0;
-
-  return Array.from({length:steps+1},(_,i)=>{
-    const f=i/steps;
-    const A = Math.sin((1-f)*Omega)/sinOmega;
-    const B = Math.sin(f*Omega)/sinOmega;
-    
-    const x=A*Math.cos(la1)*Math.cos(lo1)+B*Math.cos(la2)*Math.cos(lo2);
-    const y=A*Math.cos(la1)*Math.sin(lo1)+B*Math.cos(la2)*Math.sin(lo2);
-    const z=A*Math.sin(la1)+B*Math.sin(la2);
-    
-    let lat = Math.atan2(z,Math.sqrt(x*x+y*y))*d;
-    let lon = Math.atan2(y,x)*d;
-    
-    // Antimeridian crossing fix
-    if (prevLon !== null) {
-      const diff = lon - prevLon;
-      if (diff > 180) lonOffset -= 360;
-      else if (diff < -180) lonOffset += 360;
-    }
-    prevLon = lon;
-    
-    return [lon + lonOffset, lat] as [number,number];
-  });
-}
-
-/* ── Utilities ───────────────────────────────────────────────────────── */
-function formatDistance(meters?: number) {
-  if (!meters) return "--";
-  if (meters < 1000) return `${Math.round(meters)} m`;
-  return `${(meters / 1000).toFixed(1)} km`;
-}
-
-function formatDuration(seconds?: number) {
-  if (!seconds) return "--";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
-}
-
-/* ── Hub hubs (from project1.py: Dubai, Singapore, New York, Beijing) ─ */
-const HUB_IATA = ["DXB","SIN","JFK","PEK"];
-const STUB: Record<string,AP> = {
-  DXB:{icao:"OMDB",iata:"DXB",name:"Dubai Intl",city:"Dubai",country:"AE",lat:25.252,lon:55.364},
-  SIN:{icao:"WSSS",iata:"SIN",name:"Changi",city:"Singapore",country:"SG",lat:1.360,lon:103.989},
-  JFK:{icao:"KJFK",iata:"JFK",name:"JFK Intl",city:"New York",country:"US",lat:40.639,lon:-73.779},
-  PEK:{icao:"ZBAA",iata:"PEK",name:"Capital Intl",city:"Beijing",country:"CN",lat:40.080,lon:116.584},
-  HKG:{icao:"VHHH",iata:"HKG",name:"Hong Kong Intl",city:"Hong Kong",country:"HK",lat:22.308,lon:113.915},
-  LHR:{icao:"EGLL",iata:"LHR",name:"Heathrow",city:"London",country:"GB",lat:51.477,lon:-0.461},
-  FRA:{icao:"EDDF",iata:"FRA",name:"Frankfurt",city:"Frankfurt",country:"DE",lat:50.033,lon:8.570},
-  ORD:{icao:"KORD",iata:"ORD",name:"O'Hare Intl",city:"Chicago",country:"US",lat:41.978,lon:-87.904},
-  BOM:{icao:"VABB",iata:"BOM",name:"Chhatrapati Shivaji",city:"Mumbai",country:"IN",lat:19.089,lon:72.868},
-  SYD:{icao:"YSSY",iata:"SYD",name:"Kingsford Smith",city:"Sydney",country:"AU",lat:-33.947,lon:151.179},
+const MODE_META = {
+  air:    { label: "Air Freight",    icon: Plane,  color: "#dc2626", bg: "#fef2f2", border: "#fecaca", speed: "Fastest",    co2: "High"   },
+  sea:    { label: "Sea Freight",    icon: Ship,   color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", speed: "Slowest",    co2: "Lowest" },
+  land:   { label: "Land / Road",   icon: Truck,  color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0", speed: "Moderate",   co2: "Medium" },
+  hybrid: { label: "Hybrid",        icon: Navigation, color: "#7c3aed", bg: "#faf5ff", border: "#e9d5ff", speed: "Balanced", co2: "Low"  },
 };
 
-const ROUTE_COLORS = ["#dc2626","#2563eb","#16a34a","#d97706","#7c3aed"];
-
-function computeRoutes(from: AP, to: AP, hubs: AP[]): RouteOption[] {
-  const AIR_KMH = 900;
-  const direct = hav(from, to);
-
-  const routes: RouteOption[] = [];
-  routes.push({
-    label: "Direct",
-    legs: [from, to],
-    distKm: direct,
-    hours: direct / AIR_KMH,
-    color: ROUTE_COLORS[0],
-  });
-
-  hubs.forEach((hub, i) => {
-    if (hub.iata === from.iata || hub.iata === to.iata) return;
-    const via = hav(from, hub) + hav(hub, to);
-    routes.push({
-      label: `Via ${hub.city}`,
-      legs: [from, hub, to],
-      distKm: via,
-      hours: via / AIR_KMH + 1.5, // 1.5h layover
-      color: ROUTE_COLORS[i+1] || "#6b7280",
-      dash: [8,5],
-    });
-  });
-
-  routes.sort((a,b) => a.distKm - b.distKm);
-  return routes;
+/* ── Haversine ─────────────────────────────────────────────────────────────── */
+function hav(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371, r = Math.PI / 180;
+  const dLat = (lat2 - lat1) * r, dLon = (lon2 - lon1) * r;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-
-/* ── Components ─────────────────────────────────────────────────────── */
-
-function LandRouteViewer({ fromAP, toAP, incTitle }: { fromAP: AP, toAP: AP, incTitle: string }) {
-  const navigate = useNavigate();
-  const [routeData, setRouteData] = useState<OsrmRouteData | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function fetchRoute() {
-      setLoading(true);
-      try {
-        const response = await fetch(
-          `https://router.project-osrm.org/route/v1/driving/${fromAP.lon},${fromAP.lat};${toAP.lon},${toAP.lat}?overview=full&geometries=geojson`,
-        );
-        const data = await response.json();
-        const route = data?.routes?.[0];
-        if (!route?.geometry?.coordinates) return;
-
-        setRouteData({
-          coordinates: route.geometry.coordinates as [number, number][],
-          duration: route.duration as number,
-          distance: route.distance as number,
-        });
-      } catch (error) {
-        console.error("Failed to fetch route:", error);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    // Only fetch if distance is reasonable or they are different
-    if (fromAP.lon !== toAP.lon) fetchRoute();
-    else setLoading(false);
-  }, [fromAP, toAP]);
-
-  const progressCoordinates = useMemo(() => {
-    return routeData?.coordinates?.slice(0, 1) ?? [];
-  }, [routeData]);
-
-  const courierPosition = progressCoordinates[progressCoordinates.length - 1];
-  const mapRef = useRef<MapRef>(null);
-
-  useEffect(() => {
-    mapRef.current?.easeTo({ pitch: 60, duration: 500 });
-  }, []);
-
-  const distKm = (routeData?.distance || hav(fromAP, toAP) * 1000) / 1000;
-  const zoom = distKm > 8000 ? 2 : distKm > 4000 ? 2.8 : distKm > 2000 ? 3.8 : distKm > 500 ? 5 : 7;
-
+/* ── Cost Badge ─────────────────────────────────────────────────────────────── */
+function CostBreakdown({ cost }: { cost: CostData }) {
+  const [expanded, setExpanded] = useState(false);
   return (
-    <div className="p-8 h-[calc(100vh-120px)] bg-slate-50 overflow-y-auto font-sans">
-      <button onClick={()=>navigate(-1)} className="mb-4 flex items-center gap-2 text-xs font-mono font-bold uppercase tracking-wider text-slate-500 hover:text-slate-700 bg-white border border-slate-200 rounded-md px-3 py-1.5 cursor-pointer shadow-sm">
-        <ArrowLeft size={13}/> Back
+    <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition-colors"
+      >
+        <div className="flex items-center gap-3">
+          <DollarSign size={16} className="text-emerald-600" />
+          <span className="font-bold text-slate-800">Freight Cost Estimate</span>
+          <span className="text-xs font-mono text-slate-400">(approx. 5t cargo)</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-xl font-bold text-emerald-600">{fmtINR(cost.total_usd)}</span>
+          <span className="text-xs text-slate-400">{expanded ? "▲" : "▼"}</span>
+        </div>
       </button>
-
-      <div className="bg-white mx-auto grid max-w-7xl rounded-xl border border-slate-200 shadow-sm md:h-[600px] md:grid-cols-[1.05fr_1fr] overflow-hidden">
-        <div className="flex flex-col p-5 md:p-6 overflow-y-auto">
-          <div className="space-y-1">
-            <h3 className="text-2xl font-semibold tracking-tight text-slate-900">
-              Track Freight
-            </h3>
-            <p className="text-sm text-slate-500">Incident: {incTitle}</p>
+      {expanded && (
+        <div className="border-t border-slate-100 px-5 py-4 space-y-3 bg-slate-50">
+          <div className="grid grid-cols-2 gap-3">
+            {Object.entries(cost.breakdown).map(([k, v]) => (
+              <div key={k} className="bg-white rounded-lg border border-slate-200 px-3 py-2.5">
+                <div className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-400 mb-1">
+                  {k.replace(/_/g, " ")}
+                </div>
+                <div className="font-bold text-slate-800 text-sm">{fmtINR(v)}</div>
+              </div>
+            ))}
           </div>
-
-          <Card className="mt-5 shadow-none border-slate-200">
-            <CardHeader className="pb-4">
-              <CardTitle className="font-medium text-slate-800 text-lg">
-                Route summary
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex items-center justify-between text-sm border border-slate-100 rounded-md px-4 py-2.5 bg-slate-50">
-                <span className="text-slate-500 font-medium">Distance</span>
-                <span className="font-bold text-slate-800">{formatDistance(routeData?.distance || distKm * 1000)}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm border border-slate-100 rounded-md px-4 py-2.5 bg-slate-50">
-                <span className="text-slate-500 font-medium">Est. travel time</span>
-                <span className="font-bold text-slate-800">{formatDuration(routeData?.duration)}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm border border-slate-100 rounded-md px-4 py-2.5 bg-slate-50">
-                <span className="text-slate-500 font-medium">Route mode</span>
-                <span className="font-bold text-slate-800">Road / Rail</span>
-              </div>
-              <div className="flex items-center justify-between text-sm border border-slate-100 rounded-md px-4 py-2.5 bg-slate-50">
-                <span className="text-slate-500 font-medium">Origin</span>
-                <span className="font-bold text-slate-800 truncate ml-4">{fromAP.name || fromAP.city}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm border border-slate-100 rounded-md px-4 py-2.5 bg-slate-50">
-                <span className="text-slate-500 font-medium">Destination</span>
-                <span className="font-bold text-slate-800 truncate ml-4">{toAP.name || toAP.city}</span>
-              </div>
-            </CardContent>
-          </Card>
-
-
-          <div className="mt-6 flex flex-wrap items-center gap-2">
-            <Button size="sm" className="gap-1.5 bg-slate-900 text-white hover:bg-slate-800">
-              <Clock3 className="size-4" />
-              View timeline
-            </Button>
-            <Button variant="outline" size="sm" className="gap-1.5 border-slate-200 text-slate-700 hover:bg-slate-50">
-              <UserRound className="size-4" />
-              Contact carrier
-            </Button>
+          <div className="flex items-center gap-4 pt-2 text-xs font-mono text-slate-500">
+            <span className="flex items-center gap-1"><Clock size={11} />{cost.transit_days.toFixed(1)} days</span>
+            <span className="flex items-center gap-1 text-emerald-600"><Leaf size={11} />{cost.co2_kg.toLocaleString()} kg CO₂</span>
+            <span className="flex items-center gap-1"><MapPin size={11} />{cost.distance_km.toLocaleString()} km</span>
           </div>
+          <p className="text-[10px] text-slate-400 font-mono">Based on 2024 industry average freight rates. Actual costs vary by carrier, Incoterms, and market conditions.</p>
         </div>
-
-        <div className="relative h-[400px] overflow-hidden bg-slate-100 md:h-full md:border-l border-slate-200">
-          <Map
-            ref={mapRef}
-            loading={loading}
-            center={[(fromAP.lon + toAP.lon) / 2, (fromAP.lat + toAP.lat) / 2]}
-            zoom={zoom}
-            pitch={60}
-            styles={{
-              light: "https://tiles.openfreemap.org/styles/liberty",
-              dark: "https://tiles.openfreemap.org/styles/liberty",
-            }}
-          >
-            <MapControls position="top-right" showZoom showCompass showFullscreen/>
-            <MapRoute
-              id="delivery-full-route"
-              coordinates={routeData?.coordinates ?? []}
-              color="#3b82f6"
-              width={6}
-              opacity={0.95}
-              interactive={false}
-            />
-
-            <MapMarker longitude={fromAP.lon} latitude={fromAP.lat}>
-              <MarkerContent>
-                <div className="size-4 rounded-full border-2 border-white bg-emerald-500 shadow-sm" />
-              </MarkerContent>
-              <MarkerTooltip><span className="text-xs text-slate-800 text-nowrap">Supplier: {fromAP.name}</span></MarkerTooltip>
-            </MapMarker>
-
-            <MapMarker longitude={toAP.lon} latitude={toAP.lat}>
-              <MarkerContent>
-                <div className="size-4 rounded-full border-2 border-white bg-rose-500 shadow-sm" />
-              </MarkerContent>
-              <MarkerTooltip><span className="text-xs text-slate-800 text-nowrap">Logistics Hub: {toAP.name}</span></MarkerTooltip>
-            </MapMarker>
-          </Map>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function AirRouteViewer({ fromAP, toAP, incTitle, costUsd, mode, hubs }: { fromAP: AP, toAP: AP, incTitle: string, costUsd: number, mode: "air"|"sea"|"hybrid", hubs: AP[] }) {
+/* ── Route tab selector ──────────────────────────────────────────────────── */
+function ModeTab({ mode, active, label, Icon, color, onClick }: {
+  mode: string; active: boolean; label: string; Icon: React.ElementType; color: string; onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-bold text-xs transition-all border ${
+        active
+          ? "text-white border-transparent shadow-md"
+          : "bg-white text-slate-500 border-slate-200 hover:border-slate-300 hover:text-slate-700"
+      }`}
+      style={active ? { backgroundColor: color, borderColor: color } : {}}
+    >
+      <Icon size={13} />
+      {label}
+    </button>
+  );
+}
+
+/* ── Main component ─────────────────────────────────────────────────────── */
+export default function RouteViewer() {
+  const [params] = useSearchParams();
   const navigate = useNavigate();
   const mapRef = useRef<MapRef>(null);
-  const [active, setActive] = useState(0);
 
-  const routes = useMemo(()=>computeRoutes(fromAP,toAP,hubs).slice(0, 2),[fromAP,toAP,hubs]);
-  const sel = routes[active] || routes[0];
+  const fromLat   = parseFloat(params.get("fromLat") || "");
+  const fromLng   = parseFloat(params.get("fromLng") || "");
+  const fromLabel = params.get("fromLabel") || "Origin";
+  const toLat     = parseFloat(params.get("toLat") || "");
+  const toLng     = parseFloat(params.get("toLng") || "");
+  const toLabel   = params.get("toLabel") || "Destination";
+  const incTitle  = params.get("incident") || "Route Visualisation";
+  const paramMode = (params.get("mode") || "air") as keyof typeof MODE_META;
 
-  const center: [number,number] = [(fromAP.lon+toAP.lon)/2,(fromAP.lat+toAP.lat)/2];
-  const distKm = routes[0]?.distKm || 0;
-  const zoom   = distKm>8000?2:distKm>4000?2.8:distKm>2000?3.8:distKm>500?5:7;
+  const hasCoords = !isNaN(fromLat) && !isNaN(fromLng) && !isNaN(toLat) && !isNaN(toLng);
 
-  // Guard: same location
-  if (distKm < 1) {
+  const [activeMode, setActiveMode] = useState<keyof typeof MODE_META>(
+    Object.keys(MODE_META).includes(paramMode) ? paramMode : "air"
+  );
+  const [loading, setLoading] = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+
+  // Route data per mode
+  const [seaCoords,    setSeaCoords]    = useState<[number,number][] | null>(null);
+  const [seaDist,      setSeaDist]      = useState(0);
+  const [landCoords,   setLandCoords]   = useState<[number,number][] | null>(null);
+  const [landDist,     setLandDist]     = useState(0);
+  const [landDuration, setLandDuration] = useState(0);
+  const [landViable,   setLandViable]   = useState<boolean | null>(null);
+  const [landReason,   setLandReason]   = useState("");
+  const [airData,      setAirData]      = useState<AirRouteData | null>(null);
+  const [activeAirRoute, setActiveAirRoute] = useState(0);
+
+  // Source attribution per mode (which real API answered)
+  const [sourceMeta, setSourceMeta] = useState<Partial<Record<string, string>>>({});
+
+  // Cost data per mode
+  const [costs, setCosts] = useState<Partial<Record<string, CostData>>>({});
+
+  const directKm = hasCoords ? hav(fromLat, fromLng, toLat, toLng) : 0;
+
+  const center: [number, number] = hasCoords
+    ? [(fromLng + toLng) / 2, (fromLat + toLat) / 2]
+    : [78.96, 20.59];
+  const zoom = directKm > 8000 ? 2 : directKm > 4000 ? 2.5 : directKm > 2000 ? 3.5 : directKm > 500 ? 5 : 7;
+
+  /* ── Fetch cost for a mode ──────────────────────────────────────────────── */
+  const fetchCost = useCallback(async (mode: string, distance_km: number) => {
+    if (!distance_km || costs[mode]) return;
+    try {
+      const res = await fetch(`${BASE}/route-cost`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ mode, distance_km, weight_kg: 5000 }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCosts(prev => ({ ...prev, [mode]: data }));
+      }
+    } catch { /* silent */ }
+  }, [costs]);
+
+  /* ── Fetch sea route ────────────────────────────────────────────────────── */
+  const fetchSea = useCallback(async () => {
+    if (!hasCoords || seaCoords) return;
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch(`${BASE}/sea-route`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ from_lat: fromLat, from_lng: fromLng, to_lat: toLat, to_lng: toLng }),
+      });
+      const data = await res.json();
+      setSeaCoords(data.coordinates);
+      setSeaDist(data.distance_km);
+      const lbl = data.source === "searoute"
+        ? `Eurostat searoute v1.6 (real maritime lanes)`
+        : `Maritime waypoint graph (${(data.waypoints || []).length} chokepoints)`;
+      setSourceMeta(prev => ({ ...prev, sea: lbl }));
+      fetchCost("sea", data.distance_km);
+    } catch (e: any) {
+      setError("Sea route API unavailable.");
+    } finally { setLoading(false); }
+  }, [hasCoords, seaCoords, fromLat, fromLng, toLat, toLng, fetchCost]);
+
+  /* ── Fetch land route ───────────────────────────────────────────────────── */
+  const fetchLand = useCallback(async () => {
+    if (!hasCoords || landCoords !== null || landViable === false) return;
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch(`${BASE}/land-route`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ from_lat: fromLat, from_lng: fromLng, to_lat: toLat, to_lng: toLng }),
+      });
+      const data = await res.json();
+      if (data.viable === false) {
+        setLandViable(false);
+        setLandReason(data.reason || "Not viable by road.");
+        setLandDist(data.distance_km || directKm);
+      } else {
+        setLandViable(true);
+        setLandCoords(data.coordinates);
+        setLandDist(data.distance_km);
+        setLandDuration(data.duration_hours);
+        setSourceMeta(prev => ({ ...prev, land: data.source_label || data.source || "OSRM" }));
+        fetchCost("land", data.distance_km);
+      }
+    } catch (e: any) {
+      setError("Land route API unavailable.");
+    } finally { setLoading(false); }
+  }, [hasCoords, landCoords, landViable, fromLat, fromLng, toLat, toLng, directKm, fetchCost]);
+
+  /* ── Fetch air route ────────────────────────────────────────────────────── */
+  const fetchAir = useCallback(async () => {
+    if (!hasCoords || airData) return;
+    setLoading(true); setError(null);
+    try {
+      const res = await fetch(`${BASE}/air-route`, {
+        method: "POST",
+        headers: authHeaders(),
+        body: JSON.stringify({ from_lat: fromLat, from_lng: fromLng, to_lat: toLat, to_lng: toLng, from_label: fromLabel, to_label: toLabel }),
+      });
+      const data: AirRouteData = await res.json();
+      setAirData(data);
+      // Store source attribution for display
+      if (data.source_label) {
+        setSourceMeta(prev => ({ ...prev, air: data.source_label }));
+      }
+      fetchCost("air", data.direct.distance_km);
+    } catch (e: any) {
+      setError("Air route API unavailable.");
+    } finally { setLoading(false); }
+  }, [hasCoords, airData, fromLat, fromLng, toLat, toLng, fromLabel, toLabel, fetchCost]);
+
+  /* ── Trigger fetch when mode changes ─────────────────────────────────────── */
+  useEffect(() => {
+    if (activeMode === "sea")    fetchSea();
+    if (activeMode === "land")   fetchLand();
+    if (activeMode === "air")    fetchAir();
+    if (activeMode === "hybrid") { fetchSea(); fetchLand(); fetchCost("hybrid", directKm); }
+  }, [activeMode]); // eslint-disable-line
+
+  /* ── Map ease-to on mode switch ──────────────────────────────────────────── */
+  useEffect(() => {
+    mapRef.current?.easeTo({ center, zoom, duration: 800 });
+  }, [activeMode]); // eslint-disable-line
+
+  if (!hasCoords) {
     return (
-      <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",height:"calc(100vh - 120px)",background:"#f8fafc",gap:16}}>
-        <button onClick={()=>navigate(-1)} style={{position:"absolute",top:24,left:24,display:"flex",alignItems:"center",gap:6,fontSize:11,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",color:"#64748b",background:"#fff",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 10px",cursor:"pointer"}}>
-          <ArrowLeft size={13}/> Back
-        </button>
-        <div style={{background:"#fff",border:"1px solid #fecaca",borderRadius:12,padding:"28px 36px",textAlign:"center",maxWidth:420}}>
-          <p style={{fontSize:12,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"#94a3b8",marginBottom:12}}>Route Unavailable</p>
-          <p style={{fontSize:15,fontWeight:700,color:"#0f172a",margin:"0 0 8px"}}>Origin and destination are the same location</p>
-          <p style={{fontSize:13,color:"#64748b",margin:0}}>{fromAP.name || fromAP.city} — no route can be plotted when both points are identical. Check that the supplier nodes have distinct coordinates in the backend.</p>
+      <div className="h-[calc(100vh-120px)] flex items-center justify-center bg-slate-50">
+        <div className="text-center space-y-3">
+          <AlertTriangle size={32} className="text-amber-500 mx-auto" />
+          <p className="text-slate-700 font-bold">No route coordinates provided.</p>
+          <button onClick={() => navigate(-1)} className="text-sm text-slate-500 underline">← Go back</button>
         </div>
       </div>
     );
   }
 
-  const MAP_2D = "https://tiles.openfreemap.org/styles/bright";
+  const meta = MODE_META[activeMode] ?? MODE_META.air;
+  const ModeIcon = meta.icon;
 
-  const accentBg    = mode==="air"?"#fef2f2":mode==="hybrid"?"#f0fdf4":"#eff6ff";
-  const accentBdr   = mode==="air"?"#fecaca":mode==="hybrid"?"#bbf7d0":"#bfdbfe";
-  const accentText  = mode==="air"?"#dc2626":mode==="hybrid"?"#16a34a":"#2563eb";
+  /* ── Determine active route coords / distance ────────────────────────────── */
+  let activeCoords: [number, number][] = [];
+  let activeDist = directKm;
+  let activeRoutes: { label: string; coords: [number,number][]; color: string; dash?: [number,number] }[] = [];
+
+  if (activeMode === "sea" && seaCoords) {
+    activeCoords = seaCoords;
+    activeDist = seaDist;
+    activeRoutes = [{ label: "Maritime Route", coords: seaCoords, color: "#2563eb" }];
+  } else if (activeMode === "land") {
+    if (landCoords && landViable) {
+      activeCoords = landCoords;
+      activeDist = landDist;
+      activeRoutes = [{ label: "Road Route (OSRM)", coords: landCoords, color: "#16a34a" }];
+    }
+  } else if (activeMode === "air" && airData) {
+    const airRouteOptions = [
+      { label: "Direct Great Circle", coords: airData.direct.coordinates, color: "#dc2626", dist: airData.direct.distance_km },
+      { label: `Via ${airData.via_hubs.origin_hub?.city ?? "Hub"} → ${airData.via_hubs.dest_hub?.city ?? "Hub"}`, coords: airData.via_hubs.coordinates, color: "#f59e0b", dist: airData.via_hubs.distance_km, dash: [8,4] as [number,number] },
+      ...(airData.via_alt_hub ? [{ label: `Via ${airData.via_alt_hub.hub?.city ?? "Alt Hub"}`, coords: airData.via_alt_hub.coordinates!, color: "#7c3aed", dist: airData.via_alt_hub.distance_km, dash: [4,4] as [number,number] }] : []),
+    ];
+    activeRoutes = airRouteOptions.map(r => ({ label: r.label, coords: r.coords, color: r.color, dash: r.dash }));
+    activeCoords = airRouteOptions[activeAirRoute]?.coords ?? airRouteOptions[0]?.coords ?? [];
+    activeDist = airRouteOptions[activeAirRoute]?.dist ?? directKm;
+  } else if (activeMode === "hybrid") {
+    // Combine sea + land segments
+    if (seaCoords) activeRoutes.push({ label: "Sea Leg", coords: seaCoords, color: "#2563eb" });
+    if (landCoords && landViable) activeRoutes.push({ label: "Land Leg", coords: landCoords, color: "#16a34a", dash: [6,3] });
+    activeDist = (seaDist * 0.7) + (landDist * 0.3);
+  }
+
+  const activeCost = costs[activeMode];
 
   return (
-    <div style={{display:"flex",flexDirection:"column",height:"calc(100vh - 120px)",background:"#f8fafc",fontFamily:"Inter,system-ui,sans-serif"}}>
-      {/* Header */}
-      <div style={{flexShrink:0,background:"#fff",borderBottom:"1px solid #e2e8f0",padding:"10px 18px",display:"flex",alignItems:"center",gap:12,boxShadow:"0 1px 2px rgba(0,0,0,.05)"}}>
-        <button onClick={()=>navigate(-1)} style={{display:"flex",alignItems:"center",gap:6,fontSize:11,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".08em",color:"#64748b",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:6,padding:"5px 10px",cursor:"pointer"}}>
-          <ArrowLeft size={13}/> Back
+    <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 120px)", background: "#f8fafc", fontFamily: "Inter, system-ui, sans-serif" }}>
+
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
+      <div style={{ flexShrink: 0, background: "#fff", borderBottom: "1px solid #e2e8f0", padding: "10px 20px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 1px 3px rgba(0,0,0,.06)" }}>
+        <button
+          onClick={() => navigate(-1)}
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em", color: "#64748b", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 7, padding: "5px 11px", cursor: "pointer" }}
+        >
+          <ArrowLeft size={13} /> Back
         </button>
-        <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-          {mode==="air"?<Plane size={15} style={{color:"#dc2626",flexShrink:0}}/>:<Plane size={15} style={{color:accentText,flexShrink:0}}/>}
-          <div>
-            <p style={{fontSize:10,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"#94a3b8",margin:0}}>
-              {mode==="air"?"Air Freight":mode==="hybrid"?"Hybrid Freight":"Sea Freight"} · {incTitle}
-            </p>
-            <p style={{fontSize:13,fontWeight:700,color:"#0f172a",margin:0}}>
-              {fromAP.city} ({fromAP.iata||fromAP.icao}) → {toAP.city} ({toAP.iata||toAP.icao})
-            </p>
-          </div>
+
+        {/* Mode tabs */}
+        <div style={{ display: "flex", gap: 6, flex: 1, flexWrap: "wrap" }}>
+          {(Object.keys(MODE_META) as (keyof typeof MODE_META)[]).map((m) => {
+            const mm = MODE_META[m];
+            const Icon = mm.icon;
+            const active = activeMode === m;
+            return (
+              <button
+                key={m}
+                onClick={() => setActiveMode(m)}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  padding: "6px 14px", borderRadius: 8, fontSize: 12, fontWeight: 700,
+                  cursor: "pointer", transition: "all .15s", border: "1.5px solid",
+                  borderColor: active ? mm.color : "#e2e8f0",
+                  background: active ? mm.color : "#fff",
+                  color: active ? "#fff" : "#64748b",
+                }}
+              >
+                <Icon size={13} />
+                {mm.label}
+              </button>
+            );
+          })}
         </div>
-        <div style={{display:"flex",gap:8,flexShrink:0}}>
+
+        {/* Route summary pills */}
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
           {[
-            {icon:<MapPin size={11}/>,  v:`${Math.round(distKm).toLocaleString()} km`, c:"#475569", bg:"#f8fafc", b:"#e2e8f0"},
-            {icon:<Clock size={11}/>,   v:`${routes[0]?Math.round(routes[0].hours)+"h":"—"}`, c:"#475569", bg:"#f8fafc", b:"#e2e8f0"},
-            ...(costUsd>0?[{icon:<MapPin size={11}/>,v:fmtINR(costUsd),c:"#dc2626",bg:"#fef2f2",b:"#fecaca"}]:[]),
-          ].map((p,i)=>(
-            <span key={i} style={{display:"flex",alignItems:"center",gap:5,fontSize:11,fontFamily:"monospace",fontWeight:700,color:p.c,border:`1px solid ${p.b}`,background:p.bg,borderRadius:6,padding:"4px 9px"}}>{p.icon}{p.v}</span>
+            { label: `${Math.round(activeDist).toLocaleString()} km`, icon: <MapPin size={10} />, c: "#475569" },
+            ...(activeCost ? [
+              { label: fmtINR(activeCost.total_usd), icon: <DollarSign size={10} />, c: "#dc2626" },
+              { label: `${activeCost.transit_days.toFixed(1)}d`, icon: <Clock size={10} />, c: "#475569" },
+            ] : []),
+          ].map((p, i) => (
+            <span key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontFamily: "monospace", fontWeight: 700, color: p.c, border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 6, padding: "4px 9px" }}>
+              {p.icon}{p.label}
+            </span>
           ))}
         </div>
       </div>
 
-      {/* Body */}
-      <div style={{display:"flex",flex:1,minHeight:0}}>
-        {/* Map */}
-        <div style={{flex:1,position:"relative",overflow:"hidden"}}>
-          <Map ref={mapRef} theme="light" styles={{light:MAP_2D,dark:MAP_2D}}
-            center={center} zoom={zoom} pitch={0} bearing={0} className="w-full h-full">
-            <MapControls position="bottom-right" showZoom showCompass showFullscreen/>
+      {/* ── Route subtitle ─────────────────────────────────────────────────── */}
+      <div style={{ flexShrink: 0, background: meta.bg, borderBottom: `1px solid ${meta.border}`, padding: "8px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+        <ModeIcon size={14} style={{ color: meta.color, flexShrink: 0 }} />
+        <span style={{ fontSize: 11, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: meta.color }}>{meta.label}</span>
+        <span style={{ fontSize: 11, color: "#64748b", fontWeight: 600 }}>
+          {fromLabel} → {toLabel}
+        </span>
+        <span style={{ marginLeft: "auto", fontSize: 10, fontFamily: "monospace", color: "#94a3b8" }}>
+          Speed: {meta.speed} · CO₂: {meta.co2}
+        </span>
+        <span style={{ fontSize: 10, fontFamily: "monospace", color: "#94a3b8" }}>{incTitle}</span>
+      </div>
 
-            {/* All routes — dim inactive */}
-            {routes.map((r,i)=>{
-              const isActive = i===active;
-              return r.legs.slice(0,-1).map((leg,j)=>{
-                const coords = arc(leg, r.legs[j+1]);
-                return [
-                  <MapRoute key={`g-${i}-${j}`} id={`glow-${i}-${j}`} coordinates={coords}
-                    color={r.color} width={isActive?14:0} opacity={0.15} interactive={false}/>,
-                  <MapRoute key={`r-${i}-${j}`} id={`rt-${i}-${j}`} coordinates={coords}
-                    color={r.color} width={isActive?3.5:1.5} opacity={isActive?0.95:0.35}
-                    dashArray={r.dash} interactive={false}/>,
-                ];
-              });
-            })}
+      {/* ── Body ─────────────────────────────────────────────────────────────── */}
+      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+
+        {/* Map area */}
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+          {loading && (
+            <div style={{ position: "absolute", inset: 0, zIndex: 20, background: "rgba(248,250,252,.85)", display: "flex", alignItems: "center", justifyContent: "center", gap: 10 }}>
+              <Loader2 size={20} className="animate-spin" style={{ color: meta.color }} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#64748b" }}>Computing {meta.label}…</span>
+            </div>
+          )}
+
+          <Map
+            ref={mapRef}
+            theme="light"
+            styles={{
+              light: "https://tiles.openfreemap.org/styles/bright",
+              dark: "https://tiles.openfreemap.org/styles/bright",
+            }}
+            center={center}
+            zoom={zoom}
+            pitch={0}
+            bearing={0}
+            className="w-full h-full"
+          >
+            <MapControls position="bottom-right" showZoom showCompass showFullscreen />
+
+            {/* Render all active routes */}
+            {activeRoutes.map((r, i) => [
+              // Glow layer
+              <MapRoute key={`glow-${i}`} id={`glow-${activeMode}-${i}`}
+                coordinates={r.coords} color={r.color} width={18} opacity={0.10} interactive={false} />,
+              // Main line
+              <MapRoute key={`line-${i}`} id={`line-${activeMode}-${i}`}
+                coordinates={r.coords} color={r.color} width={activeRoutes.length > 1 ? (i === activeAirRoute ? 4 : 2) : 4}
+                opacity={activeRoutes.length > 1 ? (i === activeAirRoute ? 1 : 0.35) : 0.95}
+                dashArray={r.dash} interactive={false} />,
+            ])}
+
+            {/* Waypoint markers (air hubs) */}
+            {activeMode === "air" && airData?.via_hubs?.origin_hub && (
+              <MapMarker longitude={airData.via_hubs.origin_hub.lng} latitude={airData.via_hubs.origin_hub.lat}>
+                <MarkerContent>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b", border: "2px solid white", boxShadow: "0 0 4px #f59e0b" }} />
+                </MarkerContent>
+                <MarkerTooltip>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0f172a" }}>
+                    {airData.via_hubs.origin_hub.iata} — {airData.via_hubs.origin_hub.name}
+                  </span>
+                </MarkerTooltip>
+              </MapMarker>
+            )}
+            {activeMode === "air" && airData?.via_hubs?.dest_hub && (
+              <MapMarker longitude={airData.via_hubs.dest_hub.lng} latitude={airData.via_hubs.dest_hub.lat}>
+                <MarkerContent>
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: "#f59e0b", border: "2px solid white", boxShadow: "0 0 4px #f59e0b" }} />
+                </MarkerContent>
+                <MarkerTooltip>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0f172a" }}>
+                    {airData.via_hubs.dest_hub.iata} — {airData.via_hubs.dest_hub.name}
+                  </span>
+                </MarkerTooltip>
+              </MapMarker>
+            )}
+            {activeMode === "air" && airData?.via_alt_hub?.hub && (
+              <MapMarker longitude={airData.via_alt_hub.hub.lng} latitude={airData.via_alt_hub.hub.lat}>
+                <MarkerContent>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: "#7c3aed", border: "2px solid white" }} />
+                </MarkerContent>
+                <MarkerTooltip>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: "#0f172a" }}>
+                    {airData.via_alt_hub.hub.iata} — {airData.via_alt_hub.hub.name}
+                  </span>
+                </MarkerTooltip>
+              </MapMarker>
+            )}
+
+            {/* Origin marker */}
+            <MapMarker longitude={fromLng} latitude={fromLat}>
+              <MarkerContent>
+                <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#16a34a", border: "2.5px solid white", boxShadow: "0 0 8px #16a34a" }} />
+              </MarkerContent>
+              <MarkerTooltip><span style={{ fontSize: 11, fontWeight: 700 }}>Origin: {fromLabel}</span></MarkerTooltip>
+            </MapMarker>
+
+            {/* Destination marker */}
+            <MapMarker longitude={toLng} latitude={toLat}>
+              <MarkerContent>
+                <div style={{ width: 14, height: 14, borderRadius: "50%", background: "#dc2626", border: "2.5px solid white", boxShadow: "0 0 8px #dc2626" }} />
+              </MarkerContent>
+              <MarkerTooltip><span style={{ fontSize: 11, fontWeight: 700 }}>Destination: {toLabel}</span></MarkerTooltip>
+            </MapMarker>
           </Map>
 
           {/* Map legend */}
-          <div style={{position:"absolute",bottom:52,left:12,zIndex:10,background:"rgba(255,255,255,.92)",backdropFilter:"blur(8px)",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 14px",boxShadow:"0 2px 8px rgba(0,0,0,.08)"}}>
-            <p style={{fontSize:9,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"#94a3b8",margin:"0 0 8px"}}>Routes</p>
-            {routes.map((r,i)=>(
-              <div key={i} onClick={()=>setActive(i)} style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,cursor:"pointer",opacity:i===active?1:.55}}>
-                <span style={{display:"inline-block",width:24,height:3,borderRadius:2,background:r.color}}/>
-                <span style={{fontSize:11,fontFamily:"monospace",fontWeight:i===active?700:400,color:"#334155"}}>{r.label}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Side panel */}
-        <div style={{width:296,flexShrink:0,background:"#fff",borderLeft:"1px solid #e2e8f0",overflowY:"auto",display:"flex",flexDirection:"column"}}>
-          <div style={{padding:"12px 18px",borderBottom:"1px solid #e2e8f0",background:"#f8fafc"}}>
-            <p style={{fontSize:9,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"#94a3b8",margin:0}}>Route Options · {routes.length}</p>
-          </div>
-
-          <div style={{padding:16,display:"flex",flexDirection:"column",gap:10}}>
-            {routes.map((r,i)=>{
-              const isA = i===active;
-              return (
-                <div key={i} onClick={()=>setActive(i)} style={{border:`1.5px solid ${isA?r.color:"#e2e8f0"}`,borderRadius:10,padding:"12px 14px",background:isA?"#fafcff":"#fff",cursor:"pointer",boxShadow:isA?"0 2px 12px rgba(0,0,0,.07)":"none",transition:"all .15s"}}>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-                    <div style={{display:"flex",alignItems:"center",gap:7}}>
-                      <span style={{width:10,height:10,borderRadius:"50%",background:r.color,flexShrink:0}}/>
-                      <span style={{fontSize:12,fontWeight:700,color:"#0f172a"}}>{r.label}</span>
-                      {i===0&&<span style={{fontSize:9,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",color:accentText,background:accentBg,border:`1px solid ${accentBdr}`,borderRadius:4,padding:"1px 6px"}}>Best</span>}
-                    </div>
-                    {isA&&<span style={{fontSize:9,fontFamily:"monospace",color:"#16a34a",fontWeight:700}}>● Active</span>}
-                  </div>
-                  <div style={{display:"flex",gap:14,fontSize:11,fontFamily:"monospace",color:"#64748b"}}>
-                    <span style={{display:"flex",alignItems:"center",gap:4}}><MapPin size={10}/>{Math.round(r.distKm).toLocaleString()} km</span>
-                    <span style={{display:"flex",alignItems:"center",gap:4}}><Clock size={10}/>
-                      {r.hours<24?`${Math.round(r.hours)}h`:`${Math.floor(r.hours/24)}d ${Math.round(r.hours%24)}h`}
-                    </span>
-                  </div>
-                  {r.legs.length>2&&(
-                    <div style={{marginTop:6,fontSize:10,fontFamily:"monospace",color:"#94a3b8"}}>
-                      Stop: {r.legs.slice(1,-1).map(h=>h.city).join(" → ")}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-
-            <div style={{borderTop:"1px solid #e2e8f0",paddingTop:14,marginTop:4}}>
-              <p style={{fontSize:9,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"#94a3b8",marginBottom:10}}>Selected Route Detail</p>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
-                {[
-                  {l:"Distance",v:`${Math.round(sel?.distKm||0).toLocaleString()} km`,icon:<MapPin size={10}/>,c:"#0f172a"},
-                  {l:"Travel Time",v:sel?.hours?sel.hours<24?`${Math.round(sel.hours)}h`:`${Math.floor(sel.hours/24)}d ${Math.round(sel.hours%24)}h`:"—",icon:<Clock size={10}/>,c:"#0f172a"},
-                  {l:"Speed",v:"900 km/h",icon:<Navigation size={10}/>,c:accentText},
-                  {l:"Stops",v:`${(sel?.legs?.length||2)-2}`,icon:<Plane size={10}/>,c:"#64748b"},
-                ].map(m=>(
-                  <div key={m.l} style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px",background:"#fff"}}>
-                    <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:5,color:"#94a3b8"}}>{m.icon}<span style={{fontSize:9,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".08em"}}>{m.l}</span></div>
-                    <div style={{fontSize:15,fontWeight:700,color:m.c}}>{m.v}</div>
-                  </div>
-                ))}
-              </div>
-              {([{label:"Supplier",ap:fromAP,dot:"#16a34a"},{label:"Logistics Hub",ap:toAP,dot:"#dc2626"}]).map(({label,ap,dot})=>(
-                <div key={label} style={{border:"1px solid #e2e8f0",borderRadius:8,padding:"10px 12px",background:"#fff",marginBottom:8}}>
-                  <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:4}}>
-                    <span style={{width:7,height:7,borderRadius:"50%",background:dot,flexShrink:0}}/>
-                    <span style={{fontSize:9,fontFamily:"monospace",fontWeight:700,textTransform:"uppercase",letterSpacing:".1em",color:"#94a3b8"}}>{label}</span>
-                  </div>
-                  <p style={{fontSize:12,fontWeight:700,color:"#0f172a",margin:0}}>{ap.name || ap.city}</p>
-                  <p style={{fontSize:10,fontFamily:"monospace",color:"#64748b",margin:"2px 0 6px"}}>{ap.city !== ap.name ? ap.city : ""}{ap.country ? " · " + ap.country : ""}</p>
-                  <div style={{display:"flex",gap:5}}>
-                    {ap.iata && <span style={{fontSize:9,fontFamily:"monospace",fontWeight:700,color:"#2563eb",background:"#eff6ff",border:"1px solid #bfdbfe",borderRadius:3,padding:"1px 5px"}}>IATA {ap.iata}</span>}
-                    {ap.icao && <span style={{fontSize:9,fontFamily:"monospace",color:"#94a3b8",background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:3,padding:"1px 5px"}}>ICAO {ap.icao}</span>}
-                  </div>
+          {activeRoutes.length > 1 && (
+            <div style={{ position: "absolute", bottom: 52, left: 12, zIndex: 10, background: "rgba(255,255,255,.95)", backdropFilter: "blur(8px)", border: "1px solid #e2e8f0", borderRadius: 10, padding: "12px 14px", boxShadow: "0 2px 8px rgba(0,0,0,.08)" }}>
+              <p style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "#94a3b8", margin: "0 0 8px" }}>Route Options</p>
+              {activeRoutes.map((r, i) => (
+                <div key={i} onClick={() => setActiveAirRoute(i)} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5, cursor: "pointer", opacity: i === activeAirRoute ? 1 : 0.5 }}>
+                  <span style={{ display: "inline-block", width: 24, height: 3, borderRadius: 2, background: r.color }} />
+                  <span style={{ fontSize: 11, fontFamily: "monospace", fontWeight: i === activeAirRoute ? 700 : 400, color: "#334155" }}>{r.label}</span>
                 </div>
               ))}
             </div>
+          )}
+        </div>
+
+        {/* ── Side panel ──────────────────────────────────────────────────── */}
+        <div style={{ width: 320, flexShrink: 0, background: "#fff", borderLeft: "1px solid #e2e8f0", overflowY: "auto", display: "flex", flexDirection: "column", gap: 0 }}>
+          {/* Header */}
+          <div style={{ padding: "14px 18px", borderBottom: "1px solid #e2e8f0", background: "#f8fafc" }}>
+            <p style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "#94a3b8", margin: 0 }}>
+              {meta.label} · Route Detail
+            </p>
+          </div>
+
+          {/* Not viable banner (land) */}
+          {activeMode === "land" && landViable === false && (
+            <div style={{ margin: 14, padding: "14px 16px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <AlertTriangle size={14} style={{ color: "#dc2626", flexShrink: 0 }} />
+                <span style={{ fontSize: 11, fontFamily: "monospace", fontWeight: 700, color: "#dc2626", textTransform: "uppercase" }}>Not Viable by Road</span>
+              </div>
+              <p style={{ fontSize: 12, color: "#7f1d1d", margin: 0, lineHeight: 1.5 }}>{landReason}</p>
+              <button
+                onClick={() => setActiveMode("sea")}
+                style={{ marginTop: 10, padding: "7px 14px", background: "#2563eb", color: "#fff", border: "none", borderRadius: 7, fontSize: 11, fontWeight: 700, cursor: "pointer" }}
+              >
+                Switch to Sea Freight →
+              </button>
+            </div>
+          )}
+
+          {/* Error state */}
+          {error && (
+            <div style={{ margin: 14, padding: "14px 16px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10 }}>
+              <p style={{ fontSize: 12, color: "#92400e", margin: 0 }}>{error}</p>
+              <button
+                onClick={() => { setError(null); if (activeMode === "sea") { setSeaCoords(null); fetchSea(); } if (activeMode === "land") { setLandCoords(null); setLandViable(null); fetchLand(); } if (activeMode === "air") { setAirData(null); fetchAir(); } }}
+                style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontWeight: 700, color: "#92400e", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+              >
+                <RefreshCw size={11} /> Retry
+              </button>
+            </div>
+          )}
+
+          {/* Route metrics */}
+          <div style={{ padding: "16px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
+            {[
+              { label: "Distance", value: `${Math.round(activeDist).toLocaleString()} km`, icon: <MapPin size={12} />, color: "#0f172a" },
+              ...(activeMode === "land" && landDuration ? [{ label: "Est. Drive Time", value: `${landDuration.toFixed(0)}h`, icon: <Clock size={12} />, color: "#0f172a" }] : []),
+              ...(activeCost ? [
+                { label: "Freight Cost (5t)", value: fmtINR(activeCost.total_usd), icon: <DollarSign size={12} />, color: "#16a34a" },
+                { label: "Transit Days", value: `${activeCost.transit_days.toFixed(1)} days`, icon: <Clock size={12} />, color: "#0f172a" },
+                { label: "CO₂ Footprint", value: `${activeCost.co2_kg.toLocaleString()} kg`, icon: <Leaf size={12} />, color: "#16a34a" },
+              ] : []),
+            ].map(m => (
+              <div key={m.label} style={{ border: "1px solid #e2e8f0", borderRadius: 9, padding: "11px 14px", background: "#fff" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 4, color: "#94a3b8" }}>
+                  {m.icon}
+                  <span style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".08em" }}>{m.label}</span>
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 800, color: m.color }}>{m.value}</div>
+              </div>
+            ))}
+
+            {/* Air sub-routes selector */}
+            {activeMode === "air" && airData && activeRoutes.length > 1 && (
+              <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 14 }}>
+                <p style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "#94a3b8", marginBottom: 8 }}>Air Route Options</p>
+                {activeRoutes.map((r, i) => {
+                  const isA = i === activeAirRoute;
+                  return (
+                    <div
+                      key={i}
+                      onClick={() => setActiveAirRoute(i)}
+                      style={{ border: `1.5px solid ${isA ? r.color : "#e2e8f0"}`, borderRadius: 9, padding: "10px 12px", background: isA ? "#fafcff" : "#fff", cursor: "pointer", marginBottom: 8, transition: "all .15s" }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+                        <span style={{ width: 10, height: 10, borderRadius: "50%", background: r.color, flexShrink: 0, display: "inline-block" }} />
+                        <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{r.label}</span>
+                        {i === 0 && <span style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, padding: "1px 6px" }}>DIRECT</span>}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Cost breakdown */}
+            {activeCost && (
+              <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 14 }}>
+                <p style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "#94a3b8", marginBottom: 8 }}>Cost Breakdown</p>
+                {Object.entries(activeCost.breakdown).map(([k, v]) => (
+                  <div key={k} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 0", borderBottom: "1px solid #f1f5f9" }}>
+                    <span style={{ fontSize: 11, color: "#64748b", textTransform: "capitalize" }}>{k.replace(/_/g, " ")}</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{fmtINR(v)}</span>
+                  </div>
+                ))}
+                <div style={{ fontSize: 9, fontFamily: "monospace", color: "#94a3b8", marginTop: 10, lineHeight: 1.4 }}>
+                  Based on 2024 avg freight rates for 5,000 kg cargo. Actual costs vary by carrier and Incoterms.
+                </div>
+              </div>
+            )}
+
+            {/* Locations */}
+            <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 14 }}>
+              {[{ label: "Origin", name: fromLabel, dot: "#16a34a" }, { label: "Destination", name: toLabel, dot: "#dc2626" }].map(({ label, name, dot }) => (
+                <div key={label} style={{ border: "1px solid #e2e8f0", borderRadius: 9, padding: "10px 12px", background: "#fff", marginBottom: 8 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: dot, flexShrink: 0, display: "inline-block" }} />
+                    <span style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "#94a3b8" }}>{label}</span>
+                  </div>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", margin: 0 }}>{name}</p>
+                </div>
+              ))}
+            </div>
+
+            {/* Routing source attribution */}
+            {(sourceMeta[activeMode] || (activeMode === "air" && airData?.source_label)) && (
+              <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 14 }}>
+                <p style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, textTransform: "uppercase", letterSpacing: ".1em", color: "#94a3b8", marginBottom: 6 }}>Routing Source</p>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "8px 10px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 8 }}>
+                  <CheckCircle size={12} style={{ color: "#16a34a", marginTop: 1, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: "#166534", fontFamily: "monospace", fontWeight: 600, lineHeight: 1.4 }}>
+                    {sourceMeta[activeMode] ||
+                      (activeMode === "air" ? airData?.source_label : undefined) ||
+                      "Real-time API"}
+                  </span>
+                </div>
+                <p style={{ fontSize: 9, fontFamily: "monospace", color: "#94a3b8", marginTop: 6 }}>Free, no API key · Open data</p>
+              </div>
+            )}
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-
-/* ── Main Entry ─────────────────────────────────────────────────────── */
-export default function RouteViewer() {
-  const [params] = useSearchParams();
-
-  const mode     = (params.get("mode") || "air") as "air"|"land"|"sea"|"hybrid";
-  const costUsd  = Number(params.get("cost") || 0);
-  const incTitle = params.get("incident") || "Route Visualisation";
-
-  // ── Prefer real lat/lng coords if passed (new dynamic path) ──────────
-  const fromLat = parseFloat(params.get("fromLat") || "");
-  const fromLng = parseFloat(params.get("fromLng") || "");
-  const fromLabel = params.get("fromLabel") || "";
-  const toLat   = parseFloat(params.get("toLat") || "");
-  const toLng   = parseFloat(params.get("toLng") || "");
-  const toLabel = params.get("toLabel") || "";
-
-  const hasRealCoords = !isNaN(fromLat) && !isNaN(fromLng) && !isNaN(toLat) && !isNaN(toLng)
-                        && (fromLat !== 0 || fromLng !== 0 || toLat !== 0 || toLng !== 0);
-
-  // ── Legacy IATA code path (used when lat/lng not provided) ────────────
-  const fromCode = (params.get("from") || "HKG").toUpperCase();
-  const toCode   = (params.get("to")   || "LHR").toUpperCase();
-
-  const [airports, setAirports] = useState<Record<string,AP>>({});
-
-  useEffect(()=>{ fetch("/airports.json").then(r=>r.json()).then(setAirports).catch(()=>{}); },[]);
-
-  const iataIdx = useMemo<Record<string,AP>>(()=>{
-    const idx: Record<string,AP>={};
-    for (const ap of Object.values(airports)) if(ap.iata?.trim()) idx[ap.iata.trim().toUpperCase()]=ap;
-    return idx;
-  },[airports]);
-
-  // Build AP objects — real coords take priority
-  const fromAP: AP = hasRealCoords
-    ? { icao: "", iata: "", name: fromLabel, city: fromLabel, country: "", lat: fromLat, lon: fromLng }
-    : (iataIdx[fromCode] || STUB[fromCode] || STUB.HKG);
-
-  const toAP: AP = hasRealCoords
-    ? { icao: "", iata: "", name: toLabel, city: toLabel, country: "", lat: toLat, lon: toLng }
-    : (iataIdx[toCode] || STUB[toCode] || STUB.LHR);
-
-  const hubs = useMemo(()=>HUB_IATA.map(c=>iataIdx[c]||STUB[c]).filter(Boolean),[iataIdx]);
-
-  // Don't render until airports.json is loaded (or we have real coords so we don't need it)
-  if (!hasRealCoords && Object.keys(airports).length === 0) return null;
-
-  if (mode === "land") {
-    return <LandRouteViewer fromAP={fromAP} toAP={toAP} incTitle={incTitle} />;
-  }
-
-  return <AirRouteViewer fromAP={fromAP} toAP={toAP} incTitle={incTitle} costUsd={costUsd} mode={mode} hubs={hubs} />;
 }
