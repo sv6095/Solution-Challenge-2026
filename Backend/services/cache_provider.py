@@ -30,7 +30,12 @@ async def _get_redis_client() -> Any | None:
     try:
         from redis.asyncio import Redis
 
-        _redis_client = Redis.from_url(_redis_url(), decode_responses=True, socket_connect_timeout=1.0, socket_timeout=2.0)
+        _redis_client = Redis.from_url(
+            _redis_url(),
+            decode_responses=True,
+            socket_connect_timeout=1.0,
+            socket_timeout=2.0,
+        )
         await _redis_client.ping()
         return _redis_client
     except Exception:
@@ -68,28 +73,7 @@ async def cache_get(key: str) -> Any | None:
                     return raw
             except Exception:
                 pass
-        try:
-            from upstash_redis import Redis
-
-            url = (os.getenv("UPSTASH_REDIS_REST_URL") or "").strip()
-            token = (os.getenv("UPSTASH_REDIS_REST_TOKEN") or "").strip()
-            if not (url and token):
-                raise RuntimeError("Upstash REST credentials are not configured")
-            r = Redis(url=url, token=token)
-            raw = r.get(key)
-            if raw is None:
-                return None
-            if isinstance(raw, (bytes, bytearray)):
-                raw = raw.decode("utf-8", errors="replace")
-            try:
-                return json.loads(raw)
-            except Exception:
-                return raw
-        except Exception:
-            cached_value = cache_get_entry(key)
-            if cached_value is not None:
-                return cached_value
-            return _memory_get(key)
+        # Redis unavailable — fall through to Firestore/memory
     cached_value = cache_get_entry(key)
     if cached_value is not None:
         return cached_value
@@ -107,7 +91,7 @@ async def cache_set(key: str, value: Any, ttl_seconds: int = 1800) -> None:
         try:
             loop = _asyncio.get_event_loop()
             await loop.run_in_executor(None, _write_to_firestore)
-        except Exception as exc:
+        except Exception:
             pass  # Non-critical: in-memory cache already populated
 
     if _cache_provider() == "redis":
@@ -121,24 +105,11 @@ async def cache_set(key: str, value: Any, ttl_seconds: int = 1800) -> None:
                 return
             except Exception:
                 pass
-        try:
-            from upstash_redis import Redis
+        # Redis unavailable — fall through to in-memory + Firestore.
+        _memory_set(key, value, ttl_seconds)
+        _asyncio.ensure_future(_background_firestore_write())
+        return
 
-            url = (os.getenv("UPSTASH_REDIS_REST_URL") or "").strip()
-            token = (os.getenv("UPSTASH_REDIS_REST_TOKEN") or "").strip()
-            if not (url and token):
-                raise RuntimeError("Upstash REST credentials are not configured")
-            r = Redis(url=url, token=token)
-            payload = json.dumps(value) if not isinstance(value, (str, bytes)) else value
-            r.set(key, payload, ex=ttl_seconds)
-            # Fire Firestore write in the background — don't block the response.
-            _asyncio.ensure_future(_background_firestore_write())
-            return
-        except Exception:
-            # Both Redis paths failed — fall through to in-memory + Firestore.
-            _memory_set(key, value, ttl_seconds)
-            _asyncio.ensure_future(_background_firestore_write())
-            return
     # Memory-only provider: write memory synchronously, Firestore asynchronously.
     cache_prune_expired()
     _memory_set(key, value, ttl_seconds)
