@@ -282,7 +282,7 @@ const IncidentSimulator = () => {
                 <span>Detected: {detail.created_at ? new Date(String(detail.created_at)).toLocaleString() : "—"}</span>
                 {detail.source_url && (
                   <a
-                    href={String(detail.source_url)}
+                    href={String(detail.source_url).startsWith('http') ? String(detail.source_url) : `https://${String(detail.source_url)}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-1.5 text-red-500 hover:underline font-bold"

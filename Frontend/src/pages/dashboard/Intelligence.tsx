@@ -326,7 +326,7 @@ const Intelligence = () => {
                       )}
                       {Boolean(selectedSignal.url) && (
                         <a
-                          href={String(selectedSignal.url)}
+                          href={String(selectedSignal.url).startsWith('http') ? String(selectedSignal.url) : `https://${String(selectedSignal.url)}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-1.5 text-red-500 hover:underline font-bold"

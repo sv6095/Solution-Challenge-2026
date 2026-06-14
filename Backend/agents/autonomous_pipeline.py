@@ -736,30 +736,44 @@ async def _process_single_event(
     event_type = str(event.get("event_type", "") or event.get("type", "risk"))
     description = str(event.get("description", "") or event.get("title", ""))
 
-    try:
-        from langdetect import detect
-        title_lang = detect(title) if len(title.strip()) > 5 else "en"
-        desc_lang = detect(description) if len(description.strip()) > 5 else "en"
-        
-        if title_lang != "en" or desc_lang != "en":
+    # ── Language gate: translate non-English titles/descriptions to English ──
+    def _is_non_english(text: str) -> bool:
+        if not text or len(text.strip()) < 4:
+            return False
+        non_ascii = sum(1 for ch in text if ord(ch) > 127)
+        if non_ascii / max(1, len(text)) > 0.25:
+            return True
+        try:
+            from langdetect import detect
+            return detect(text) != "en"
+        except Exception:
+            return False
+
+    if _is_non_english(title) or _is_non_english(description):
+        try:
             from services.llm_provider import structured_complete
             from pydantic import BaseModel
-            
+
             class EventTranslation(BaseModel):
                 title: str
                 description: str
-                
+
             translated = await structured_complete(
-                prompt=f"Translate the following event title and description to English. Respond with accurate translations.\n\nTitle: {title}\nDescription: {description}",
+                prompt=(
+                    "Translate the following event title and description to English. "
+                    "Respond ONLY with the JSON object containing 'title' and 'description'.\n\n"
+                    f"Title: {title}\nDescription: {description}"
+                ),
                 output_model=EventTranslation,
-                system="You are an expert translator. Your job is to translate foreign language incident reports to English.",
-                max_tokens=400
+                system="You are an expert translator. Translate foreign-language incident reports to English.",
+                max_tokens=400,
             )
             title = translated.title
             description = translated.description
-    except Exception:
-        # Fallback: if detection or translation fails, keep the original text
-        pass
+        except Exception:
+            # Translation failed — keep original text and continue processing.
+            # Better to have a foreign-language incident than to silently drop it.
+            pass
 
     try:
         severity_raw = float(event.get("severity_raw") or 0)

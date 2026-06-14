@@ -7,6 +7,25 @@ import hashlib
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+
+def _is_likely_non_english(text: str) -> bool:
+    """Return True when text contains a high proportion of non-ASCII characters,
+    which reliably signals non-Latin scripts (Gujarati, Hindi, Arabic, CJK, etc.).
+    Falls back to langdetect when the ASCII ratio is ambiguous.
+    """
+    if not text or len(text.strip()) < 4:
+        return False
+    # Primary check: if >25 % of characters are non-ASCII, it's almost certainly non-English
+    non_ascii = sum(1 for ch in text if ord(ch) > 127)
+    if non_ascii / max(1, len(text)) > 0.25:
+        return True
+    # Secondary check: try langdetect for borderline cases (Latin-script non-English)
+    try:
+        from langdetect import detect
+        return detect(text) != "en"
+    except Exception:
+        return False
+
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from agents.citation_tracker import enrich_signal_item, mark_corroborations
@@ -374,30 +393,33 @@ async def _poll_sources() -> None:
             for evt in events[:25]:
                 if evt["id"] in existing_ids:
                     continue
-                try:
-                    from langdetect import detect
-                    title = str(evt.get("title") or "")
-                    desc = str(evt.get("description") or "")
-                    title_lang = detect(title) if len(title.strip()) > 5 else "en"
-                    desc_lang = detect(desc) if len(desc.strip()) > 5 else "en"
-                    if title_lang != "en" or desc_lang != "en":
+                title = str(evt.get("title") or "")
+                desc = str(evt.get("description") or "")
+                if _is_likely_non_english(title) or _is_likely_non_english(desc):
+                    try:
                         from services.llm_provider import structured_complete
                         from pydantic import BaseModel
-                        
+
                         class EventTranslation(BaseModel):
                             title: str
                             description: str
-                            
+
                         translated = await structured_complete(
-                            prompt=f"Translate the following event title and description to English.\n\nTitle: {title}\nDescription: {desc}",
+                            prompt=(
+                                "Translate the following event title and description to English. "
+                                "Respond ONLY with the JSON object containing 'title' and 'description'.\n\n"
+                                f"Title: {title}\nDescription: {desc}"
+                            ),
                             output_model=EventTranslation,
-                            system="You are an expert translator. Your job is to translate foreign language incident reports to English.",
-                            max_tokens=400
+                            system="You are an expert translator. Translate foreign-language incident reports to English.",
+                            max_tokens=400,
                         )
                         evt["title"] = translated.title
                         evt["description"] = translated.description
-                except Exception:
-                    pass
+                    except Exception:
+                        # Translation failed — keep original text and continue processing.
+                        # Better to have a foreign-language incident than to silently drop it.
+                        pass
                 
                 inc = incident_engine.process_event(evt, suppliers_for_gnn)
                 if inc:
