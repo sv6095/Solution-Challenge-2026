@@ -36,15 +36,20 @@ export function HeroGlobe() {
 
   const sampleArcs = [
     { startLat: -19.885592, startLng: -43.951191, endLat: -22.9068, endLng: -43.1729, arcAlt: 0.1 },
-    { startLat: 28.6139, startLng: 77.209, endLat: 3.139, endLng: 101.6869, arcAlt: 0.2 },
+    { startLat: 3.139, startLng: 101.6869, endLat: 28.6139, endLng: 77.209, arcAlt: 0.2 }, // Reversed
     { startLat: 51.5072, startLng: -0.1276, endLat: 3.139, endLng: 101.6869, arcAlt: 0.3 },
-    { startLat: -15.785493, startLng: -47.909029, endLat: 36.162809, endLng: -115.119411, arcAlt: 0.3 },
+    { startLat: 36.162809, startLng: -115.119411, endLat: -15.785493, endLng: -47.909029, arcAlt: 0.3 }, // Reversed
     { startLat: -33.8688, startLng: 151.2093, endLat: 22.3193, endLng: 114.1694, arcAlt: 0.3 },
-    { startLat: 34.0522, startLng: -118.2437, endLat: 48.8566, endLng: -2.3522, arcAlt: 0.2 }
+    { startLat: 48.8566, startLng: -2.3522, endLat: 34.0522, endLng: -118.2437, arcAlt: 0.2 } // Reversed
   ].map((arc, i) => ({
     ...arc,
     color: colors[i % colors.length]
   }));
+
+  const samplePoints = sampleArcs.flatMap(arc => [
+    { lat: arc.startLat, lng: arc.startLng },
+    { lat: arc.endLat, lng: arc.endLng }
+  ]);
 
   return (
     <div ref={containerRef} className="w-full h-full min-h-[400px] md:min-h-[600px] cursor-grab active:cursor-grabbing bg-black relative overflow-hidden flex items-center justify-center rounded-xl">
@@ -68,9 +73,9 @@ export function HeroGlobe() {
         arcAltitude="arcAlt"
         atmosphereColor="#ef4444"
         atmosphereAltitude={0.15}
-        pointsData={sampleArcs}
-        pointLat="startLat"
-        pointLng="startLng"
+        pointsData={samplePoints}
+        pointLat="lat"
+        pointLng="lng"
         pointColor={() => "#ef4444"}
         pointAltitude={0}
         pointRadius={1.5} // Thicker points
