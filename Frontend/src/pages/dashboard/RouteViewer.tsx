@@ -84,9 +84,9 @@ function CostBreakdown({ cost }: { cost: CostData }) {
             ))}
           </div>
           <div className="flex items-center gap-4 pt-2 text-xs font-mono text-slate-500">
-            <span className="flex items-center gap-1"><Clock size={11} />{cost.transit_days.toFixed(1)} days</span>
-            <span className="flex items-center gap-1 text-emerald-600"><Leaf size={11} />{cost.co2_kg.toLocaleString()} kg CO₂</span>
-            <span className="flex items-center gap-1"><MapPin size={11} />{cost.distance_km.toLocaleString()} km</span>
+            <span className="flex items-center gap-1"><Clock size={11} />{Number(cost.transit_days ?? 0).toFixed(1)} days</span>
+            <span className="flex items-center gap-1 text-emerald-600"><Leaf size={11} />{Number(cost.co2_kg ?? 0).toLocaleString()} kg CO₂</span>
+            <span className="flex items-center gap-1"><MapPin size={11} />{Number(cost.distance_km ?? 0).toLocaleString()} km</span>
           </div>
           <p className="text-[10px] text-slate-400 font-mono">Based on 2024 industry average freight rates. Actual costs vary by carrier, Incoterms, and market conditions.</p>
         </div>
@@ -370,7 +370,7 @@ export default function RouteViewer() {
             { label: `${Math.round(activeDist).toLocaleString()} km`, icon: <MapPin size={10} />, c: "#475569" },
             ...(activeCost ? [
               { label: fmtINR(activeCost.total_usd), icon: <IndianRupee size={10} />, c: "#dc2626" },
-              { label: `${activeCost.transit_days.toFixed(1)}d`, icon: <Clock size={10} />, c: "#475569" },
+              { label: `${Number(activeCost.transit_days ?? 0).toFixed(1)}d`, icon: <Clock size={10} />, c: "#475569" },
             ] : []),
           ].map((p, i) => (
             <span key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, fontFamily: "monospace", fontWeight: 700, color: p.c, border: "1px solid #e2e8f0", background: "#f8fafc", borderRadius: 6, padding: "4px 9px" }}>
@@ -556,8 +556,8 @@ export default function RouteViewer() {
               ...(activeMode === "land" && landDuration ? [{ label: "Est. Drive Time", value: `${landDuration.toFixed(0)}h`, icon: <Clock size={12} />, color: "#0f172a" }] : []),
               ...(activeCost ? [
                 { label: "Freight Cost (5t)", value: fmtINR(activeCost.total_usd), icon: <IndianRupee size={12} />, color: "#16a34a" },
-                { label: "Transit Days", value: `${activeCost.transit_days.toFixed(1)} days`, icon: <Clock size={12} />, color: "#0f172a" },
-                { label: "CO₂ Footprint", value: `${activeCost.co2_kg.toLocaleString()} kg`, icon: <Leaf size={12} />, color: "#16a34a" },
+                { label: "Transit Days", value: `${Number(activeCost.transit_days ?? 0).toFixed(1)} days`, icon: <Clock size={12} />, color: "#0f172a" },
+                { label: "CO₂ Footprint", value: `${Number(activeCost.co2_kg ?? 0).toLocaleString()} kg`, icon: <Leaf size={12} />, color: "#16a34a" },
               ] : []),
             ].map(m => (
               <div key={m.label} style={{ border: "1px solid #e2e8f0", borderRadius: 9, padding: "11px 14px", background: "#fff" }}>
