@@ -252,7 +252,7 @@ const Incidents = () => {
 
   const canAct = detail?.status === "AWAITING_APPROVAL" &&
     String(detail?.simulation_outcome || "").toLowerCase() !== "no_impact" &&
-    !Boolean(detail?.simulation_only && Number(detail?.affected_node_count || 0) === 0);
+    !(detail?.simulation_only && Number(detail?.affected_node_count || 0) === 0);
 
   /* ── Derive route coords from incident data ─────────────────────────── */
   const nodes = detail?.affected_nodes || [];
@@ -452,11 +452,10 @@ const Incidents = () => {
               </div>
 
               {/* KPI strip */}
-              <div className="grid grid-cols-3 gap-0 border-t border-slate-100">
+              <div className="grid grid-cols-2 gap-0 border-t border-slate-100">
                 {[
                   { label: "Exposure", value: fmtINR(Number(detail.total_exposure_usd || 0)), icon: IndianRupee, color: "#dc2626", critical: true },
                   { label: "Stockout", value: `${Number(detail.min_stockout_days || 0).toFixed(1)}d`, icon: Clock, color: Number(detail.min_stockout_days || 999) <= 5 ? "#dc2626" : "#d97706", critical: Number(detail.min_stockout_days || 999) <= 5 },
-                  { label: "AI Confidence", value: `${(Number(detail.gnn_confidence || 0) * 100).toFixed(0)}%`, icon: Shield, color: "#2563eb", critical: false },
                 ].map((m) => (
                   <div key={m.label} className="px-5 py-3 border-l border-slate-100 first:border-l-0">
                     <div className="flex items-center gap-1.5 mb-1">
@@ -681,6 +680,8 @@ const Incidents = () => {
                           const co2 = { air: 0.602, sea: 0.012, land: 0.096, hybrid: 0.045 }[mode] ?? 0.1;
                           const co2Kg = Math.round(routeDist * 5 * co2);
 
+                          if (!isViable) return null;
+
                           return (
                             <motion.div
                               key={`${mode}-${i}`}
@@ -757,7 +758,6 @@ const Incidents = () => {
                           <div className="px-5 py-3 bg-slate-50 border-b border-slate-100 flex items-center gap-2">
                             <Send size={12} className="text-blue-500" />
                             <span className="text-[10px] font-mono font-bold uppercase tracking-widest text-slate-500">AI-Drafted RFQ</span>
-                            <span className="ml-auto text-[9px] font-mono text-emerald-600 font-bold bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">AI Agent</span>
                           </div>
                           <div className="px-5 py-5 space-y-4">
                             <div className="grid grid-cols-[80px_1fr] gap-y-2 text-sm">

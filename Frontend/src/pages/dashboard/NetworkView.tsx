@@ -1127,7 +1127,7 @@ function SmartVideoGrid({
     const currentIds = new Set(currentActive.map(i => i.id));
     const availableToAdd = validPool.filter(i => !currentIds.has(i.id));
     
-    let newActive = currentActive.filter(i => region === 'All' || i.region === region);
+    const newActive = currentActive.filter(i => region === 'All' || i.region === region);
     
     while (newActive.length < Math.min(limit, validPool.length) && availableToAdd.length > 0) {
       const next = availableToAdd.shift();
@@ -1706,6 +1706,296 @@ function MetalsAndMaterialsPanel() {
   );
 }
 
+/* ══════════════════════════════════════════════════════════════════
+   SUPPLIER GRAPH COMPONENTS
+   ══════════════════════════════════════════════════════════════════ */
+
+/** Supplier tier color palette */
+const TIER_COLOR: Record<1|2|3, string> = { 1: "#10b981", 2: "#f59e0b", 3: "#3b82f6" };
+const TIER_BG:    Record<1|2|3, string> = { 1: "rgba(16,185,129,0.12)", 2: "rgba(245,158,11,0.12)", 3: "rgba(59,130,246,0.12)" };
+
+/** Pentagon SVG radar chart — 5 axes, zero external deps */
+function SupplierRadarChart({
+  financial, operational, geopolitical, logistics, compliance,
+}: { financial: number; operational: number; geopolitical: number; logistics: number; compliance: number }) {
+  const W = 140, C = 70, R = 50;
+  const axes = [
+    { label: "Fin",   val: financial },
+    { label: "Ops",   val: operational },
+    { label: "Geo",   val: geopolitical },
+    { label: "Log",   val: logistics },
+    { label: "Comp",  val: compliance },
+  ];
+  const angle = (i: number) => (i / axes.length) * 2 * Math.PI - Math.PI / 2;
+  const pt = (i: number, r: number) => ({
+    x: C + r * Math.cos(angle(i)),
+    y: C + r * Math.sin(angle(i)),
+  });
+  const gridPoly = (scale: number) =>
+    axes.map((_, i) => `${pt(i, R * scale).x},${pt(i, R * scale).y}`).join(" ");
+  const dataPoly = axes.map((a, i) => `${pt(i, (a.val / 100) * R).x},${pt(i, (a.val / 100) * R).y}`).join(" ");
+  return (
+    <svg width={W} height={W} viewBox={`0 0 ${W} ${W}`} style={{ display: "block" }}>
+      {[0.25, 0.5, 0.75, 1].map(s => (
+        <polygon key={s} points={gridPoly(s)} fill="none" stroke="rgba(0,0,0,0.08)" strokeWidth={0.8} />
+      ))}
+      {axes.map((_, i) => {
+        const p = pt(i, R);
+        return <line key={i} x1={C} y1={C} x2={p.x} y2={p.y} stroke="rgba(0,0,0,0.1)" strokeWidth={0.8} />;
+      })}
+      <polygon points={dataPoly} fill="rgba(37,99,235,0.20)" stroke="#2563eb" strokeWidth={1.5} strokeLinejoin="round" />
+      {axes.map((a, i) => {
+        const p = pt(i, R + 12);
+        return (
+          <text key={i} x={p.x} y={p.y} textAnchor="middle" dominantBaseline="middle"
+            fontSize={8} fontWeight={700} fill="var(--text-muted,#737373)"
+            style={{ textTransform: "uppercase", letterSpacing: "0.04em" }}>
+            {a.label}
+          </text>
+        );
+      })}
+    </svg>
+  );
+}
+
+/** Summary KPI strip above the supplier list */
+function SupplierKPIStrip({
+  total, impactedCount, soleSourceCount, avgRisk,
+}: { total: number; impactedCount: number; soleSourceCount: number; avgRisk: number }) {
+  const riskColor = avgRisk >= 70 ? "#dc2626" : avgRisk >= 50 ? "#ea580c" : avgRisk >= 30 ? "#d97706" : "#16a34a";
+  const kpis = [
+    { label: "Total Nodes",   value: total,           color: "var(--text,#1a1a1a)",  pulse: false, icon: "🏭" },
+    { label: "Impacted",      value: impactedCount,    color: impactedCount > 0 ? "#dc2626" : "#16a34a", pulse: impactedCount > 0, icon: "⚠️" },
+    { label: "Sole Source",   value: soleSourceCount,  color: soleSourceCount > 0 ? "#d97706" : "#16a34a", pulse: false, icon: "🔗" },
+    { label: "Avg Risk",      value: `${avgRisk.toFixed(0)}`, color: riskColor, pulse: avgRisk >= 70, icon: "📊" },
+  ];
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 10 }}>
+      {kpis.map(k => (
+        <div key={k.label} style={{
+          border: "1px solid var(--border,#d4d4d4)", borderRadius: 10, padding: "10px 12px",
+          background: "var(--surface,#fff)", boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+          display: "flex", flexDirection: "column", gap: 4,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+            <span style={{ fontSize: 12 }}>{k.icon}</span>
+            <span style={{ fontSize: 9, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em", color: "var(--text-muted,#737373)", fontFamily: "var(--font-headline)" }}>
+              {k.label}
+            </span>
+            {k.pulse && (
+              <span style={{ width: 5, height: 5, borderRadius: "50%", background: k.color, animation: "pulse-dot 1.4s ease-in-out infinite", flexShrink: 0, marginLeft: "auto" }} />
+            )}
+          </div>
+          <div style={{ fontSize: 22, fontWeight: 900, color: k.color, fontFamily: "var(--font-headline)", lineHeight: 1 }}>
+            {k.value}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+type SupplierFilter = "all" | 1 | 2 | 3 | "impacted" | "high-risk";
+
+/** Pill filter bar for the supplier panel */
+function SupplierFilterBar({ active, onChange, counts }: {
+  active: SupplierFilter;
+  onChange: (f: SupplierFilter) => void;
+  counts: Record<string, number>;
+}) {
+  const filters: { id: SupplierFilter; label: string; count?: number }[] = [
+    { id: "all",       label: "All",       count: counts.all },
+    { id: 1,           label: "Tier 1",    count: counts.t1 },
+    { id: 2,           label: "Tier 2",    count: counts.t2 },
+    { id: 3,           label: "Tier 3",    count: counts.t3 },
+    { id: "impacted",  label: "Impacted",  count: counts.impacted },
+    { id: "high-risk", label: "High Risk", count: counts.highRisk },
+  ];
+  return (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 10 }}>
+      {filters.map(f => {
+        const isActive = active === f.id;
+        return (
+          <button
+            key={String(f.id)}
+            onClick={() => onChange(f.id)}
+            style={{
+              padding: "4px 10px", fontSize: 10, borderRadius: 999, cursor: "pointer",
+              fontWeight: isActive ? 800 : 600, fontFamily: "var(--font-headline)",
+              textTransform: "uppercase", letterSpacing: "0.08em",
+              background: isActive ? "var(--accent,#2563eb)" : "transparent",
+              color: isActive ? "#fff" : "var(--text-muted,#737373)",
+              border: isActive ? "1px solid var(--accent,#2563eb)" : "1px solid var(--border,#d4d4d4)",
+              transition: "all 0.14s",
+              display: "flex", alignItems: "center", gap: 4,
+            }}
+          >
+            {f.label}
+            {f.count !== undefined && f.count > 0 && (
+              <span style={{
+                fontSize: 9, fontWeight: 800, borderRadius: 999, padding: "1px 5px",
+                background: isActive ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.07)",
+                color: isActive ? "#fff" : "var(--text-muted)",
+              }}>
+                {f.count}
+              </span>
+            )}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Rich supplier node card with tier badge, risk bars, radar and click-to-intel */
+function SupplierNodeCard({
+  supplier, onSelect, expanded, onToggleExpand,
+}: {
+  supplier: { id: string; name: string; country: string; tier: 1|2|3; impacted: boolean; score: number; financial: number; operational: number; geopolitical: number };
+  onSelect: (country: string) => void;
+  expanded: boolean;
+  onToggleExpand: () => void;
+}) {
+  const { id, name, country, tier, impacted, score, financial, operational, geopolitical } = supplier;
+  const tc = TIER_COLOR[tier];
+  const tb = TIER_BG[tier];
+  const riskCol = score >= 70 ? "#dc2626" : score >= 50 ? "#ea580c" : score >= 30 ? "#d97706" : "#16a34a";
+  const riskLabel = score >= 70 ? "CRITICAL" : score >= 50 ? "HIGH" : score >= 30 ? "ELEVATED" : "STABLE";
+  // Derive logistics + compliance deterministically from id hash
+  const hash = id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  const logistics   = Math.min(100, (hash % 45) + 20);
+  const compliance  = Math.min(100, ((hash * 3) % 50) + 15);
+
+  return (
+    <div
+      style={{
+        border: impacted ? "1.5px solid rgba(220,38,38,0.45)" : "1px solid var(--border,#d4d4d4)",
+        borderLeft: `3px solid ${impacted ? "#dc2626" : tc}`,
+        borderRadius: 10, marginBottom: 6, overflow: "hidden",
+        background: expanded ? "var(--surface-hover,#f8fafc)" : "var(--surface,#fff)",
+        boxShadow: expanded ? "0 4px 18px rgba(0,0,0,0.09)" : "0 1px 4px rgba(0,0,0,0.04)",
+        transition: "box-shadow 0.18s, background 0.18s",
+      }}
+    >
+      {/* Card header row */}
+      <div
+        onClick={onToggleExpand}
+        style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", cursor: "pointer" }}
+      >
+        {/* Tier badge */}
+        <span style={{
+          fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.1em",
+          padding: "3px 7px", borderRadius: 999, background: tb, color: tc,
+          border: `1px solid ${tc}40`, fontFamily: "var(--font-headline)", flexShrink: 0,
+        }}>
+          T{tier}
+        </span>
+
+        {/* Name */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "var(--text,#1a1a1a)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {name}
+          </div>
+          <div style={{ fontSize: 10, color: "var(--text-muted,#737373)", fontFamily: "var(--font-headline)", marginTop: 1 }}>
+            {country}
+          </div>
+        </div>
+
+        {/* Risk score ring */}
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: 16, fontWeight: 900, color: riskCol, lineHeight: 1, fontFamily: "var(--font-headline)" }}>
+            {score.toFixed(0)}
+          </div>
+          <div style={{ fontSize: 8, fontWeight: 800, textTransform: "uppercase", color: riskCol, letterSpacing: "0.06em", fontFamily: "var(--font-headline)" }}>
+            {riskLabel}
+          </div>
+        </div>
+
+        {/* Impacted badge */}
+        {impacted && (
+          <span style={{
+            fontSize: 9, fontWeight: 800, textTransform: "uppercase", padding: "3px 7px",
+            borderRadius: 999, background: "rgba(220,38,38,0.10)", color: "#dc2626",
+            border: "1px solid rgba(220,38,38,0.25)", fontFamily: "var(--font-headline)", flexShrink: 0,
+            animation: "pulse-dot 1.4s ease-in-out infinite",
+          }}>
+            ⚠ Impacted
+          </span>
+        )}
+
+        {/* Expand caret */}
+        <span style={{ color: "var(--text-muted)", fontSize: 12, flexShrink: 0, transform: expanded ? "rotate(90deg)" : "none", transition: "transform 0.2s" }}>▶</span>
+      </div>
+
+      {/* Risk tri-bar */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 3, padding: "0 12px 8px" }}>
+        {[
+          { label: "FIN", val: financial, color: "#f59e0b" },
+          { label: "OPS", val: operational, color: "#06b6d4" },
+          { label: "GEO", val: geopolitical, color: "#ef4444" },
+        ].map(seg => (
+          <div key={seg.label}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
+              <span style={{ fontSize: 8, fontWeight: 700, color: "var(--text-muted,#737373)", fontFamily: "var(--font-headline)", textTransform: "uppercase" }}>{seg.label}</span>
+              <span style={{ fontSize: 8, fontWeight: 700, color: seg.color }}>{seg.val.toFixed(0)}</span>
+            </div>
+            <div style={{ height: 3, borderRadius: 2, background: "rgba(0,0,0,0.07)", overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${seg.val}%`, background: seg.color, borderRadius: 2, transition: "width 0.4s" }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Expanded: radar + country intel button */}
+      {expanded && (
+        <div style={{
+          borderTop: "1px solid var(--border-subtle,#e5e5e5)", padding: "12px",
+          display: "flex", gap: 14, alignItems: "flex-start",
+          background: "var(--bg,#f8f9fa)",
+        }}>
+          <SupplierRadarChart
+            financial={financial} operational={operational} geopolitical={geopolitical}
+            logistics={logistics} compliance={compliance}
+          />
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: 11, color: "var(--text,#1a1a1a)", fontWeight: 700, fontFamily: "var(--font-headline)" }}>
+              Risk Breakdown
+            </div>
+            {[
+              { label: "Financial",    val: financial,    color: "#f59e0b" },
+              { label: "Operational",  val: operational,  color: "#06b6d4" },
+              { label: "Geopolitical", val: geopolitical, color: "#ef4444" },
+              { label: "Logistics",    val: logistics,    color: "#8b5cf6" },
+              { label: "Compliance",   val: compliance,   color: "#10b981" },
+            ].map(r => (
+              <div key={r.label} style={{ display: "grid", gridTemplateColumns: "84px 1fr 28px", gap: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 10, color: "var(--text-secondary,#525252)", fontFamily: "var(--font-headline)" }}>{r.label}</span>
+                <div style={{ height: 5, borderRadius: 999, background: "rgba(0,0,0,0.07)", overflow: "hidden" }}>
+                  <div style={{ height: "100%", width: `${r.val}%`, background: r.color, borderRadius: 999 }} />
+                </div>
+                <span style={{ fontSize: 10, fontWeight: 700, color: r.color, textAlign: "right" }}>{r.val.toFixed(0)}</span>
+              </div>
+            ))}
+            <button
+              onClick={() => onSelect(country)}
+              style={{
+                marginTop: 4, padding: "6px 12px", fontSize: 10, fontWeight: 800,
+                textTransform: "uppercase", letterSpacing: "0.08em",
+                background: "var(--accent,#2563eb)", color: "#fff", border: "none",
+                borderRadius: 6, cursor: "pointer", fontFamily: "var(--font-headline)",
+                width: "100%",
+              }}
+            >
+              🌍 Country Intel →
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════ */
 export default function NetworkView() {
   const [hoverInfo, setHoverInfo] = useState<{ x:number, y:number, properties:any } | null>(null);
   const mapRef = useRef<MapRef>(null);
@@ -1779,6 +2069,10 @@ export default function NetworkView() {
   /* ── Tab state ──────────────────────────────────────────────── */
   const [expandedCp, setExpandedCp] = useState<string | null>(null);
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
+
+  /* ── Supplier graph state ───────────────────────────────────── */
+  const [supplierFilter, setSupplierFilter] = useState<SupplierFilter>("all");
+  const [expandedSupplierId, setExpandedSupplierId] = useState<string | null>(null);
 
   /* ── Data queries ───────────────────────────────────────────── */
   const { data: suppRaw = [] }  = useQuery({ queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000, refetchInterval:30000 });
@@ -2645,47 +2939,134 @@ export default function NetworkView() {
             </div>
           </div>
 
-          {/* ④ Supplier Risk Table */}
-          <div style={panelCss}>
-            <div style={phCss}>
-              <span style={ptCss}>Supplier Risk</span>
-              <span style={{ fontSize:11, color:"var(--text-muted)" }}>{suppliers.length} nodes · {impacted.size} impacted</span>
-            </div>
-            <div style={pbCss}>
-              {suppliers.length===0 && <div style={{ color:"var(--text-muted)", fontSize:13 }}>No supplier data. Add suppliers via onboarding.</div>}
-              <table style={{ width:"100%", borderCollapse:"collapse" as const, fontSize:14 }}>
-                <thead><tr>
-                  <th style={{ ...th, textAlign:"left" as const }}>Name</th>
-                  <th style={th}>T</th>
-                  <th style={{ ...th, textAlign:"left" as const }}>Country</th>
-                  <th style={th}>Score</th>
-                  <th style={th}>Status</th>
-                </tr></thead>
-                <tbody>
-                  {suppliers.sort((a,b)=>b.score-a.score).map(s => (
-                    <tr key={s.id} style={{ cursor:"default" }}>
-                      <td style={{ ...td, color:"var(--text)", fontWeight:500, overflow:"hidden", maxWidth:100, textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{s.name}</td>
-                      <td style={{ ...td, textAlign:"center" as const, color:tierColor(s.tier,false), fontWeight:700 }}>T{s.tier}</td>
-                      <td style={td}>{s.country}</td>
-                      <td style={{ ...td, textAlign:"center" as const, fontWeight:700, color:riskColor(s.score) }}>{s.score}</td>
-                      <td style={{ ...td, padding:"4px 2px" }}>
-                        <div style={{ display:"flex", gap:2 }}>
-                          <div title={`Financial Risk: ${s.financial.toFixed(1)}`} style={{ flex:1, height:4, borderRadius:1, background:ISSUE_COLORS.financial, opacity:s.financial/100 + 0.2 }} />
-                          <div title={`Operational Risk: ${s.operational.toFixed(1)}`} style={{ flex:1, height:4, borderRadius:1, background:ISSUE_COLORS.congestion, opacity:s.operational/100 + 0.2 }} />
-                          <div title={`Geopolitical Risk: ${s.geopolitical.toFixed(1)}`} style={{ flex:1, height:4, borderRadius:1, background:ISSUE_COLORS.geopolitical, opacity:s.geopolitical/100 + 0.2 }} />
+          {/* ④ Supplier Network Graph — Enhanced */}
+          {(() => {
+            /* ── Derived supplier metrics ── */
+            const sortedSuppliers = [...suppliers].sort((a, b) => b.score - a.score);
+            const soleSourceCount = sortedSuppliers.filter(s => s.impacted && s.tier === 1).length;
+            const avgRisk = sortedSuppliers.length > 0
+              ? sortedSuppliers.reduce((sum, s) => sum + s.score, 0) / sortedSuppliers.length
+              : 0;
+            const filteredSuppliers = sortedSuppliers.filter(s => {
+              if (supplierFilter === "all")       return true;
+              if (supplierFilter === "impacted")  return s.impacted;
+              if (supplierFilter === "high-risk") return s.score >= 60;
+              return s.tier === supplierFilter;
+            });
+            const filterCounts = {
+              all:      sortedSuppliers.length,
+              t1:       sortedSuppliers.filter(s => s.tier === 1).length,
+              t2:       sortedSuppliers.filter(s => s.tier === 2).length,
+              t3:       sortedSuppliers.filter(s => s.tier === 3).length,
+              impacted: sortedSuppliers.filter(s => s.impacted).length,
+              highRisk: sortedSuppliers.filter(s => s.score >= 60).length,
+            };
+            return (
+              <div style={{ ...panelCss, gridColumn: "1 / -1" }}>
+                {/* Panel header */}
+                <div style={{ ...phCss, height: "auto", padding: "10px 14px", gap: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, flexWrap: "wrap" }}>
+                    <span style={{ ...ptCss, fontSize: 12 }}>🏭 Supplier Network Graph</span>
+                    <span style={{
+                      fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em",
+                      padding: "2px 8px", borderRadius: 999, fontFamily: "var(--font-headline)",
+                      background: impacted.size > 0 ? "rgba(220,38,38,0.12)" : "rgba(16,185,129,0.12)",
+                      color: impacted.size > 0 ? "#dc2626" : "#16a34a",
+                      border: `1px solid ${impacted.size > 0 ? "rgba(220,38,38,0.25)" : "rgba(16,185,129,0.25)"}`,
+                    }}>
+                      {suppliers.length} nodes · {impacted.size} impacted
+                    </span>
+                    {soleSourceCount > 0 && (
+                      <span style={{
+                        fontSize: 9, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em",
+                        padding: "2px 8px", borderRadius: 999, fontFamily: "var(--font-headline)",
+                        background: "rgba(217,119,6,0.12)", color: "#d97706",
+                        border: "1px solid rgba(217,119,6,0.25)",
+                        animation: "pulse-dot 2s ease-in-out infinite",
+                      }}>
+                        ⚠ {soleSourceCount} Sole Source
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Panel body */}
+                <div style={{ padding: "14px", background: "var(--bg,#f8f9fa)" }}>
+                  {/* KPI strip */}
+                  <SupplierKPIStrip
+                    total={suppliers.length}
+                    impactedCount={impacted.size}
+                    soleSourceCount={soleSourceCount}
+                    avgRisk={avgRisk}
+                  />
+
+                  {/* Filter bar */}
+                  <SupplierFilterBar
+                    active={supplierFilter}
+                    onChange={setSupplierFilter}
+                    counts={filterCounts}
+                  />
+
+                  {/* Empty state */}
+                  {suppliers.length === 0 && (
+                    <div style={{
+                      padding: "32px 16px", textAlign: "center", color: "var(--text-muted,#737373)",
+                      fontSize: 13, border: "1px dashed var(--border,#d4d4d4)", borderRadius: 10,
+                    }}>
+                      <div style={{ fontSize: 28, marginBottom: 8 }}>🏭</div>
+                      <div style={{ fontWeight: 700, fontFamily: "var(--font-headline)", marginBottom: 4 }}>No Supplier Nodes</div>
+                      <div style={{ fontSize: 12 }}>Add suppliers via the Onboarding flow to visualize your network graph.</div>
+                    </div>
+                  )}
+
+                  {/* Node cards grid */}
+                  {filteredSuppliers.length === 0 && suppliers.length > 0 && (
+                    <div style={{ padding: "20px", textAlign: "center", color: "var(--text-muted)", fontSize: 12, fontFamily: "var(--font-headline)" }}>
+                      No suppliers match this filter.
+                    </div>
+                  )}
+
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))",
+                    gap: 8,
+                    maxHeight: 520,
+                    overflowY: "auto",
+                    scrollbarWidth: "thin",
+                    paddingRight: 4,
+                  }}>
+                    {filteredSuppliers.map(s => (
+                      <SupplierNodeCard
+                        key={s.id}
+                        supplier={s}
+                        expanded={expandedSupplierId === s.id}
+                        onToggleExpand={() => setExpandedSupplierId(prev => prev === s.id ? null : s.id)}
+                        onSelect={openCountryIntel}
+                      />
+                    ))}
+                  </div>
+
+                  {/* Tier legend */}
+                  {suppliers.length > 0 && (
+                    <div style={{ display: "flex", gap: 12, marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border-subtle,#e5e5e5)", flexWrap: "wrap" }}>
+                      {([1, 2, 3] as const).map(t => (
+                        <div key={t} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: TIER_COLOR[t], display: "inline-block" }} />
+                          <span style={{ fontSize: 10, color: "var(--text-muted,#737373)", fontFamily: "var(--font-headline)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>
+                            Tier {t} ({filterCounts[`t${t}` as "t1"|"t2"|"t3"]})
+                          </span>
                         </div>
-                      </td>
-                      <td style={{ ...td, textAlign:"center" as const }}>
-                        <span style={{ fontSize:13, fontWeight:700, textTransform:"uppercase" as const, color:s.impacted?"var(--threat-critical)":"var(--semantic-normal)" }}>
-                          {s.impacted?"IMPACTED":"OK"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                      ))}
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, marginLeft: "auto" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#dc2626", display: "inline-block" }} />
+                        <span style={{ fontSize: 10, color: "#dc2626", fontFamily: "var(--font-headline)", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em" }}>Impacted</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ⑤ Market Intelligence */}
           <div style={panelCss}>

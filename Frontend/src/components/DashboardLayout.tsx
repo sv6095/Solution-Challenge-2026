@@ -112,6 +112,29 @@ const DashboardLayout = () => {
   const { lastEvent, isConnected: wsConnected } = useWebSocket(tenantId);
   const hasToken = Boolean(getAccessToken());
 
+  const {
+    data: onboardingStatus,
+    isLoading: isOnboardingStatusLoading,
+    isError: isOnboardingStatusError,
+    refetch: refetchOnboardingStatus,
+  } = useQuery({
+    queryKey: ["onboarding-status", tenantId],
+    queryFn: () => api.onboarding.status(tenantId),
+    enabled: hasToken && !!tenantId,
+  });
+
+  useEffect(() => {
+    if (!hasToken) {
+      navigate("/login");
+    }
+  }, [hasToken, navigate]);
+
+  useEffect(() => {
+    if (hasToken && onboardingStatus && !onboardingStatus.complete) {
+      navigate("/onboarding");
+    }
+  }, [hasToken, onboardingStatus, navigate]);
+
   // ── Notification State ──
   const [notifications, setNotifications] = useState<DashboardNotification[]>(() => {
     try {
@@ -357,6 +380,41 @@ const DashboardLayout = () => {
   const userId = getUserId();
   const displayName = getDisplayName() || userId;
   const userInitial = displayName ? displayName.charAt(0).toUpperCase() : "U";
+
+  if (!hasToken) return null;
+
+  if (isOnboardingStatusError) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm gap-4 px-6">
+        <p className="text-sm text-slate-600 text-center max-w-md">
+          Could not verify onboarding status. Check that the backend is running and try again.
+        </p>
+        <button
+          type="button"
+          onClick={() => refetchOnboardingStatus()}
+          className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white font-mono text-xs uppercase tracking-wider rounded"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  if (isOnboardingStatusLoading || !onboardingStatus) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm">
+        <div className="relative flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full border-[3px] border-muted/80 border-t-red-500 animate-spin" />
+          <div className="absolute w-6 h-6 rounded-full bg-red-500/10 animate-pulse-subtle" />
+        </div>
+        <span className="text-[10px] font-headline font-bold uppercase tracking-[0.2em] text-slate-500 mt-4 animate-pulse">
+          Verifying security authorization...
+        </span>
+      </div>
+    );
+  }
+
+  if (!onboardingStatus.complete) return null;
 
   return (
     <div className="min-h-screen flex bg-background">
