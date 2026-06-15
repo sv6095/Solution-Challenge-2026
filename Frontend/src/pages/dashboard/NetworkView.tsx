@@ -90,6 +90,10 @@ const fmtDate = (iso: string | number | null | undefined): string => {
 
 /* ── Score → CSS color (worldmonitor semantic palette) ──────────── */
 const clamp = (value: number, min = 0, max = 100) => Math.min(max, Math.max(min, value));
+const toFiniteNumber = (value: unknown, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
 const normalizeCountry = (value: string | null | undefined) => String(value ?? "").trim().toLowerCase();
 const slugify = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, "-");
 const hashString = (value: string) =>
@@ -287,6 +291,7 @@ function Sparkline({ values }: { values: number[] }) {
 /* ── Stress gauge bar (worldmonitor renderStress style) ─────────── */
 function StressGauge({ score, level }: { score: number; level: string }) {
   const safeLevel = String(level ?? "low").toLowerCase();
+  const safeScore = toFiniteNumber(score);
   const levelColor =
     safeLevel === "critical" ? "#dc2626"
     : safeLevel === "elevated" ? "#ea580c"
@@ -297,7 +302,7 @@ function StressGauge({ score, level }: { score: number; level: string }) {
     : safeLevel === "elevated" ? "rgba(234,88,12,0.10)"
     : safeLevel === "moderate" ? "rgba(217,119,6,0.10)"
     : "rgba(21,128,61,0.10)";
-  const w = Math.round(Math.min(100, Math.max(0, score)));
+  const w = Math.round(Math.min(100, Math.max(0, safeScore)));
   return (
     <div style={{ marginBottom:12 }}>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
@@ -309,7 +314,7 @@ function StressGauge({ score, level }: { score: number; level: string }) {
       <div style={{ position:"relative", height:6, borderRadius:3, background:"rgba(0,0,0,0.08)" }}>
         <div style={{ position:"absolute", left:0, top:0, height:"100%", width:`${w}%`, borderRadius:3, background:levelColor, transition:"width 0.4s" }} />
       </div>
-      <div style={{ textAlign:"right", fontSize:12, color:"var(--text-dim)", marginTop:2 }}>{score.toFixed(1)}/100</div>
+      <div style={{ textAlign:"right", fontSize:12, color:"var(--text-dim)", marginTop:2 }}>{safeScore.toFixed(1)}/100</div>
     </div>
   );
 }
@@ -1230,13 +1235,72 @@ const pbCssStatic = { padding: "12px", flex: 1, display: "flex", flexDirection: 
 const thStatic = { padding: "8px 6px", fontSize: 10, color: "var(--text-muted,#737373)", textTransform: "uppercase" as const, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "var(--font-headline)", borderBottom: "1px solid var(--panel-border,#d4d4d4)", whiteSpace: "nowrap" as const };
 const tdStatic = { padding: "8px 6px", borderBottom: "1px solid var(--border-subtle,#e5e5e5)", verticalAlign: "middle" };
 const GLOBAL_BUNDLE_REFETCH_MS = 300_000;
+const NETWORK_VIEW_CACHE_PREFIX = "network-view-cache:v1";
+
+function readSessionCache<T>(cacheKey: string): T | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.sessionStorage.getItem(`${NETWORK_VIEW_CACHE_PREFIX}:${cacheKey}`);
+    return raw ? JSON.parse(raw) as T : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeSessionCache<T>(cacheKey: string, value: T): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${NETWORK_VIEW_CACHE_PREFIX}:${cacheKey}`, JSON.stringify(value));
+  } catch {
+    // Ignore cache write failures such as quota errors.
+  }
+}
+
+function useSessionCachedQuery<T>({
+  cacheKey,
+  queryKey,
+  queryFn,
+  staleTime,
+  refetchInterval,
+  enabled,
+  shouldCache,
+}: {
+  cacheKey: string;
+  queryKey: readonly unknown[];
+  queryFn: () => Promise<T>;
+  staleTime?: number;
+  refetchInterval?: number;
+  enabled?: boolean;
+  shouldCache?: (value: T) => boolean;
+}) {
+  const initialData = useMemo(() => readSessionCache<T>(cacheKey), [cacheKey]);
+  const query = useQuery({
+    queryKey,
+    queryFn,
+    staleTime,
+    refetchInterval,
+    enabled,
+    initialData,
+    placeholderData: (previousData) => previousData,
+  });
+
+  useEffect(() => {
+    if (query.data === undefined) return;
+    if (shouldCache && !shouldCache(query.data)) return;
+    writeSessionCache(cacheKey, query.data);
+  }, [cacheKey, query.data, shouldCache]);
+
+  return query;
+}
 
 function useGlobalDashboardBundle() {
-  return useQuery({
+  return useSessionCachedQuery({
+    cacheKey: "global-dashboard-bundle",
     queryKey: ["globalDashboardBundle"],
     queryFn: () => api.global.dashboardBundle(),
     refetchInterval: GLOBAL_BUNDLE_REFETCH_MS,
     staleTime: 30_000,
+    shouldCache: (bundle) => Boolean(bundle?.generated_at && bundle?.summary),
   });
 }
 
@@ -1763,12 +1827,13 @@ function SupplierRadarChart({
 function SupplierKPIStrip({
   total, impactedCount, soleSourceCount, avgRisk,
 }: { total: number; impactedCount: number; soleSourceCount: number; avgRisk: number }) {
-  const riskColor = avgRisk >= 70 ? "#dc2626" : avgRisk >= 50 ? "#ea580c" : avgRisk >= 30 ? "#d97706" : "#16a34a";
+  const safeAvgRisk = toFiniteNumber(avgRisk);
+  const riskColor = safeAvgRisk >= 70 ? "#dc2626" : safeAvgRisk >= 50 ? "#ea580c" : safeAvgRisk >= 30 ? "#d97706" : "#16a34a";
   const kpis = [
     { label: "Total Nodes",   value: total,           color: "var(--text,#1a1a1a)",  pulse: false, icon: "🏭" },
     { label: "Impacted",      value: impactedCount,    color: impactedCount > 0 ? "#dc2626" : "#16a34a", pulse: impactedCount > 0, icon: "⚠️" },
     { label: "Sole Source",   value: soleSourceCount,  color: soleSourceCount > 0 ? "#d97706" : "#16a34a", pulse: false, icon: "🔗" },
-    { label: "Avg Risk",      value: `${avgRisk.toFixed(0)}`, color: riskColor, pulse: avgRisk >= 70, icon: "📊" },
+    { label: "Avg Risk",      value: `${safeAvgRisk.toFixed(0)}`, color: riskColor, pulse: safeAvgRisk >= 70, icon: "📊" },
   ];
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginBottom: 10 }}>
@@ -1858,10 +1923,14 @@ function SupplierNodeCard({
   onToggleExpand: () => void;
 }) {
   const { id, name, country, tier, impacted, score, financial, operational, geopolitical } = supplier;
+  const safeScore = toFiniteNumber(score);
+  const safeFinancial = toFiniteNumber(financial);
+  const safeOperational = toFiniteNumber(operational);
+  const safeGeopolitical = toFiniteNumber(geopolitical);
   const tc = TIER_COLOR[tier];
   const tb = TIER_BG[tier];
-  const riskCol = score >= 70 ? "#dc2626" : score >= 50 ? "#ea580c" : score >= 30 ? "#d97706" : "#16a34a";
-  const riskLabel = score >= 70 ? "CRITICAL" : score >= 50 ? "HIGH" : score >= 30 ? "ELEVATED" : "STABLE";
+  const riskCol = safeScore >= 70 ? "#dc2626" : safeScore >= 50 ? "#ea580c" : safeScore >= 30 ? "#d97706" : "#16a34a";
+  const riskLabel = safeScore >= 70 ? "CRITICAL" : safeScore >= 50 ? "HIGH" : safeScore >= 30 ? "ELEVATED" : "STABLE";
   // Derive logistics + compliance deterministically from id hash
   const hash = id.split("").reduce((a, c) => a + c.charCodeAt(0), 0);
   const logistics   = Math.min(100, (hash % 45) + 20);
@@ -1905,7 +1974,7 @@ function SupplierNodeCard({
         {/* Risk score ring */}
         <div style={{ textAlign: "right", flexShrink: 0 }}>
           <div style={{ fontSize: 16, fontWeight: 900, color: riskCol, lineHeight: 1, fontFamily: "var(--font-headline)" }}>
-            {score.toFixed(0)}
+            {safeScore.toFixed(0)}
           </div>
           <div style={{ fontSize: 8, fontWeight: 800, textTransform: "uppercase", color: riskCol, letterSpacing: "0.06em", fontFamily: "var(--font-headline)" }}>
             {riskLabel}
@@ -1931,9 +2000,9 @@ function SupplierNodeCard({
       {/* Risk tri-bar */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 3, padding: "0 12px 8px" }}>
         {[
-          { label: "FIN", val: financial, color: "#f59e0b" },
-          { label: "OPS", val: operational, color: "#06b6d4" },
-          { label: "GEO", val: geopolitical, color: "#ef4444" },
+          { label: "FIN", val: safeFinancial, color: "#f59e0b" },
+          { label: "OPS", val: safeOperational, color: "#06b6d4" },
+          { label: "GEO", val: safeGeopolitical, color: "#ef4444" },
         ].map(seg => (
           <div key={seg.label}>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 2 }}>
@@ -1955,7 +2024,7 @@ function SupplierNodeCard({
           background: "var(--bg,#f8f9fa)",
         }}>
           <SupplierRadarChart
-            financial={financial} operational={operational} geopolitical={geopolitical}
+            financial={safeFinancial} operational={safeOperational} geopolitical={safeGeopolitical}
             logistics={logistics} compliance={compliance}
           />
           <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1963,9 +2032,9 @@ function SupplierNodeCard({
               Risk Breakdown
             </div>
             {[
-              { label: "Financial",    val: financial,    color: "#f59e0b" },
-              { label: "Operational",  val: operational,  color: "#06b6d4" },
-              { label: "Geopolitical", val: geopolitical, color: "#ef4444" },
+              { label: "Financial",    val: safeFinancial,    color: "#f59e0b" },
+              { label: "Operational",  val: safeOperational,  color: "#06b6d4" },
+              { label: "Geopolitical", val: safeGeopolitical, color: "#ef4444" },
               { label: "Logistics",    val: logistics,    color: "#8b5cf6" },
               { label: "Compliance",   val: compliance,   color: "#10b981" },
             ].map(r => (
@@ -2076,19 +2145,21 @@ export default function NetworkView() {
   const [expandedSupplierId, setExpandedSupplierId] = useState<string | null>(null);
 
   /* ── Data queries ───────────────────────────────────────────── */
-  const { data: suppRaw = [] }  = useQuery({ queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000, refetchInterval:30000 });
-  const { data: evtsRaw = [] }  = useQuery({ queryKey:["risks","events"],   queryFn:()=>api.risks.events(),   staleTime:120_000, refetchInterval:30000 });
+  const { data: suppRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-suppliers", queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000, refetchInterval:30000 });
+  const { data: evtsRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-events", queryKey:["risks","events"], queryFn:()=>api.risks.events(), staleTime:120_000, refetchInterval:30000 });
   const { data: globalBundle }  = useGlobalDashboardBundle();
-  const { data: auditList=[] }  = useQuery({ queryKey:["audit","list"],queryFn:()=>api.audit.list(), staleTime:300_000, refetchInterval:30000 });
-  const { data: gapReport }     = useQuery({ queryKey:["intel","gaps"],queryFn:()=>api.intelligence.gaps(), staleTime:120_000, refetchInterval:30000 });
+  const { data: auditList=[] }  = useSessionCachedQuery({ cacheKey: "audit-list", queryKey:["audit","list"], queryFn:()=>api.audit.list(), staleTime:300_000, refetchInterval:30000 });
+  const { data: gapReport }     = useSessionCachedQuery({ cacheKey: "intel-gaps", queryKey:["intel","gaps"], queryFn:()=>api.intelligence.gaps(), staleTime:120_000, refetchInterval:30000 });
 
   /* ── User Context (Logistics Nodes) ────────────────────────── */
   const userId = useMemo(() => getUserId(), []);
-  const { data: ctxRaw } = useQuery({
+  const { data: ctxRaw } = useSessionCachedQuery({
+    cacheKey: `user-context:${userId || "anonymous"}`,
     queryKey: ["user-context", userId],
     queryFn: () => api.contexts.get(userId),
     staleTime: 300_000,
     enabled: Boolean(userId),
+    shouldCache: (value) => Boolean(value?.context),
   });
 
   const logisticsNodes = useMemo(() => {
