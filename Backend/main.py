@@ -22,18 +22,9 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 from starlette.responses import Response
 
-# Load env: base .env, then optional overlays (Section 2)
+# Load env: base .env
 _backend_root = Path(__file__).resolve().parent
-load_dotenv(dotenv_path=_backend_root / ".env", override=False)
-if os.getenv("ENVIRONMENT", "").strip().lower() == "production":
-    _prod = _backend_root / ".env.production"
-    if _prod.is_file():
-        load_dotenv(dotenv_path=_prod, override=True)
-else:
-    for _extra in (".env.development", ".env.local"):
-        _p = _backend_root / _extra
-        if _p.is_file():
-            load_dotenv(dotenv_path=_p, override=True)
+load_dotenv(dotenv_path=_backend_root / ".env", override=True)
 
 from currency.frankfurter import convert_cost, get_exchange_rate
 from currency.risk_index import compute_currency_risk_index
