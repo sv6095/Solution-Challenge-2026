@@ -172,9 +172,11 @@ export default function RouteViewer() {
   })() : 0;
 
   const center: [number, number] = hasCoords
-    ? [(fromLng + toLng) / 2, (fromLat + toLat) / 2]
+    ? (activeMode === "land" ? [fromLng, fromLat] : [(fromLng + toLng) / 2, (fromLat + toLat) / 2])
     : [78.96, 20.59];
-  const zoom = directKm > 8000 ? 2 : directKm > 4000 ? 2.5 : directKm > 2000 ? 3.5 : directKm > 500 ? 5 : 7;
+  const zoom = hasCoords
+    ? (activeMode === "land" ? 14 : (directKm > 8000 ? 2 : directKm > 4000 ? 2.5 : directKm > 2000 ? 3.5 : directKm > 500 ? 5 : 7))
+    : 4;
 
   /* ── Fetch cost for a mode ──────────────────────────────────────────────── */
   const fetchCost = useCallback(async (mode: string, distance_km: number) => {
@@ -274,7 +276,7 @@ export default function RouteViewer() {
 
   /* ── Map ease-to on mode switch ──────────────────────────────────────────── */
   useEffect(() => {
-    mapRef.current?.easeTo({ center, zoom, bearing: routeBearing, pitch: activeMode === "land" ? 60 : 45, duration: 800 });
+    mapRef.current?.easeTo({ center, zoom, bearing: routeBearing, pitch: 45, duration: 800 });
   }, [activeMode, center, zoom, routeBearing]); // eslint-disable-line
 
   if (!hasCoords) {
@@ -414,7 +416,7 @@ export default function RouteViewer() {
             }
             center={center}
             zoom={zoom}
-            pitch={activeMode === "land" ? 60 : 45}
+            pitch={45}
             bearing={routeBearing}
             className="w-full h-full"
           >
@@ -423,10 +425,10 @@ export default function RouteViewer() {
             {/* Render all active routes */}
             {activeRoutes.map((r, i) => [
               // Glow layer
-              <MapRoute key={`glow-${i}`} id={`glow-${activeMode}-${i}`}
+              <MapRoute key={`glow-${activeMode}-${i}`} id={`glow-${activeMode}-${i}`}
                 coordinates={r.coords} color={r.color} width={18} opacity={0.10} interactive={false} />,
               // Main line
-              <MapRoute key={`line-${i}`} id={`line-${activeMode}-${i}`}
+              <MapRoute key={`line-${activeMode}-${i}`} id={`line-${activeMode}-${i}`}
                 coordinates={r.coords} color={r.color} width={activeRoutes.length > 1 ? (i === activeAirRoute ? 4 : 2) : 4}
                 opacity={activeRoutes.length > 1 ? (i === activeAirRoute ? 1 : 0.35) : 0.95}
                 dashArray={r.dash} interactive={false} />,
