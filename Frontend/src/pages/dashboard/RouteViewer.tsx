@@ -2,7 +2,7 @@ import { useRef, useEffect, useState, useCallback } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   ArrowLeft, Plane, Ship, Truck, Clock, MapPin, Navigation,
-  Leaf, DollarSign, AlertTriangle, CheckCircle, Loader2, RefreshCw,
+  Leaf, DollarSign, IndianRupee, AlertTriangle, CheckCircle, Loader2, RefreshCw,
 } from "lucide-react";
 import { fmtINR } from "@/lib/currency";
 import { Map, MapRoute, MapControls, MapMarker, MarkerContent, MarkerTooltip, type MapRef } from "@/components/ui/map";
@@ -62,7 +62,7 @@ function CostBreakdown({ cost }: { cost: CostData }) {
         className="w-full flex items-center justify-between px-5 py-4 hover:bg-slate-50 transition-colors"
       >
         <div className="flex items-center gap-3">
-          <DollarSign size={16} className="text-emerald-600" />
+          <IndianRupee size={16} className="text-emerald-600" />
           <span className="font-bold text-slate-800">Freight Cost Estimate</span>
           <span className="text-xs font-mono text-slate-400">(approx. 5t cargo)</span>
         </div>
@@ -369,7 +369,7 @@ export default function RouteViewer() {
           {[
             { label: `${Math.round(activeDist).toLocaleString()} km`, icon: <MapPin size={10} />, c: "#475569" },
             ...(activeCost ? [
-              { label: fmtINR(activeCost.total_usd), icon: <DollarSign size={10} />, c: "#dc2626" },
+              { label: fmtINR(activeCost.total_usd), icon: <IndianRupee size={10} />, c: "#dc2626" },
               { label: `${activeCost.transit_days.toFixed(1)}d`, icon: <Clock size={10} />, c: "#475569" },
             ] : []),
           ].map((p, i) => (
@@ -555,7 +555,7 @@ export default function RouteViewer() {
               { label: "Distance", value: `${Math.round(activeDist).toLocaleString()} km`, icon: <MapPin size={12} />, color: "#0f172a" },
               ...(activeMode === "land" && landDuration ? [{ label: "Est. Drive Time", value: `${landDuration.toFixed(0)}h`, icon: <Clock size={12} />, color: "#0f172a" }] : []),
               ...(activeCost ? [
-                { label: "Freight Cost (5t)", value: fmtINR(activeCost.total_usd), icon: <DollarSign size={12} />, color: "#16a34a" },
+                { label: "Freight Cost (5t)", value: fmtINR(activeCost.total_usd), icon: <IndianRupee size={12} />, color: "#16a34a" },
                 { label: "Transit Days", value: `${activeCost.transit_days.toFixed(1)} days`, icon: <Clock size={12} />, color: "#0f172a" },
                 { label: "CO₂ Footprint", value: `${activeCost.co2_kg.toLocaleString()} kg`, icon: <Leaf size={12} />, color: "#16a34a" },
               ] : []),

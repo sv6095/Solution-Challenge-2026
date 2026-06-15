@@ -3770,14 +3770,15 @@ async def api_route_cost(payload: RouteCostRequest) -> dict:
             rate_per_kg = 3.50   # intercontinental
         else:
             rate_per_kg = 2.90   # ultra-long haul
-        fuel_surcharge = 0.85    # $/kg fuel surcharge
+        # Add a small distance factor so different routes have different costs
+        fuel_surcharge = 0.50 + (km * 0.0001)    # $/kg fuel surcharge
         security_fee   = 0.25    # $/kg security
         handling       = 600     # flat handling fee
         total = kg * (rate_per_kg + fuel_surcharge + security_fee) + handling
         breakdown = {
-            "freight": round(kg * rate_per_kg, 0),
-            "fuel_surcharge": round(kg * fuel_surcharge, 0),
-            "security": round(kg * security_fee, 0),
+            "freight": round(kg * rate_per_kg, 2),
+            "fuel_surcharge": round(kg * fuel_surcharge, 2),
+            "security": round(kg * security_fee, 2),
             "handling": handling,
         }
 
@@ -3846,11 +3847,12 @@ async def api_route_cost(payload: RouteCostRequest) -> dict:
         breakdown = {"estimate": round(total, 0)}
 
     # Transit time estimates (in days)
-    speed = {"air": 900, "sea": 35 * 1.852, "land": 80, "rail": 100, "hybrid": 45}
+    # Effective km/h averaged over 24h (accounting for driver rest, stops, shunting)
+    speed = {"air": 900, "sea": 35 * 1.852, "land": 35, "rail": 40, "hybrid": 35}
     kmh = speed.get(mode, 80)
     transit_days = (km / kmh) / 24.0
-    # Add fixed overhead (port clearance, loading, border)
-    overhead = {"air": 0.5, "sea": 2.0, "land": 0.25, "rail": 0.5, "hybrid": 2.5}
+    # Add fixed overhead (port clearance, loading, border crossings)
+    overhead = {"air": 0.5, "sea": 2.0, "land": 1.0, "rail": 1.5, "hybrid": 2.5}
     transit_days += overhead.get(mode, 0.5)
 
     return {
