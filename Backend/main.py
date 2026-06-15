@@ -99,6 +99,11 @@ from models.supply_graph import CustomerSupplyGraph
 
 app = FastAPI(title="SupplyShield API", version="0.2.0")
 
+# Read-control limits for Firestore-heavy incident queries.
+INCIDENT_LIST_LIMIT = 200
+INCIDENT_SUMMARY_SCAN_LIMIT = 250
+SIMULATION_LIST_LIMIT = 200
+
 _DEV_ORIGINS = ["http://localhost:3000", "http://localhost:5173"]
 _env_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
 _CORS_ORIGINS = list(dict.fromkeys(_DEV_ORIGINS + _env_origins))
@@ -3024,10 +3029,10 @@ async def api_list_incidents(status: str | None = None, user=Depends(verify_fire
     if normalized_status == "ACTIVE":
         active_statuses = {"DETECTED", "ANALYZED", "AWAITING_APPROVAL"}
         return [
-            inc for inc in list_incidents(status=None, limit=500, tenant_id=tenant_id)
+            inc for inc in list_incidents(status=None, limit=INCIDENT_LIST_LIMIT, tenant_id=tenant_id)
             if str(inc.get("status") or "").strip().upper() in active_statuses
         ]
-    return list_incidents(status=normalized_status, limit=500, tenant_id=tenant_id)
+    return list_incidents(status=normalized_status, limit=INCIDENT_LIST_LIMIT, tenant_id=tenant_id)
 
 
 @app.get("/api/incidents/summary")
@@ -3043,7 +3048,7 @@ async def api_incidents_summary(response: Response, user=Depends(verify_firebase
         from collections import Counter
         # Single Firestore scan — derive status counts from the same result set
         # instead of calling count_incidents_by_status (which issues a 2nd 1000-doc scan).
-        incidents = list_incidents(limit=500, tenant_id=tenant_id)
+        incidents = list_incidents(limit=INCIDENT_SUMMARY_SCAN_LIMIT, tenant_id=tenant_id)
         counts = dict(Counter(
             str(i.get("status") or "").strip()
             for i in incidents
@@ -3097,10 +3102,10 @@ async def api_list_monte_carlo_incidents(
     if normalized_status == "ACTIVE":
         active_statuses = {"DETECTED", "ANALYZED", "AWAITING_APPROVAL"}
         return [
-            inc for inc in list_simulation_incidents(status=None, limit=500, tenant_id=tenant_id)
+            inc for inc in list_simulation_incidents(status=None, limit=SIMULATION_LIST_LIMIT, tenant_id=tenant_id)
             if str(inc.get("status") or "").strip().upper() in active_statuses
         ]
-    return list_simulation_incidents(status=normalized_status, limit=500, tenant_id=tenant_id)
+    return list_simulation_incidents(status=normalized_status, limit=SIMULATION_LIST_LIMIT, tenant_id=tenant_id)
 
 
 @app.post("/api/incidents/{incident_id}/approve")
@@ -4178,8 +4183,8 @@ async def api_command_briefing(response: Response, user=Depends(verify_firebase_
 
         active_statuses = ("DETECTED", "ANALYZED", "AWAITING_APPROVAL")
 
-        operational = [i for i in list_incidents(limit=500, tenant_id=tenant_id) if is_incident_fresh(i)]
-        simulation = [i for i in list_simulation_incidents(limit=500, tenant_id=tenant_id) if is_incident_fresh(i)]
+        operational = [i for i in list_incidents(limit=INCIDENT_SUMMARY_SCAN_LIMIT, tenant_id=tenant_id) if is_incident_fresh(i)]
+        simulation = [i for i in list_simulation_incidents(limit=SIMULATION_LIST_LIMIT, tenant_id=tenant_id) if is_incident_fresh(i)]
 
         # Merge operational + simulation incidents and dedupe by stable identity.
         seen_keys: set[str] = set()

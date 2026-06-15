@@ -858,14 +858,16 @@ def delete_incident(incident_id: str, tenant_id: str | None = None) -> int:
 def list_incidents(status: str | None = None, limit: int = 50, tenant_id: str | None = None, visibility: str = "visible") -> list[dict[str, Any]]:
     db = _client()
     query = db.collection("tenants").document(tenant_id).collection("incidents") if tenant_id else db.collection_group("incidents")
+    if visibility == "simulation":
+        query = query.where(filter=FieldFilter("simulation_only", "==", True))
     if status:
         # Apply only the equality filter; order_by on a different field would require a composite
         # index. Fetch a larger batch and sort in Python instead.
         query = query.where(filter=FieldFilter("status", "==", status))
-        rows = _query_stream(query.limit(limit * 5))
+        rows = _query_stream(query.limit(limit * 2))
         rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
     else:
-        rows = _query_stream(query.order_by("created_at", direction=g_firestore.Query.DESCENDING).limit(limit * 3))
+        rows = _query_stream(query.order_by("created_at", direction=g_firestore.Query.DESCENDING).limit(limit * 2))
     results: list[dict[str, Any]] = []
     for row in rows:
         data = _incident_doc_to_api(row, str(row.get("_doc_id") or ""))

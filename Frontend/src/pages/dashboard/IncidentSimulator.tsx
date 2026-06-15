@@ -133,7 +133,7 @@ const IncidentSimulator = () => {
   const { data: simulationsRaw = [] } = useQuery({
     queryKey: ["intelligence", "simulation-incidents", statusFilter],
     queryFn: () => api.intelligence.simulationIncidents(statusFilter || undefined),
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
 
   const simulations = filterFreshIncidents(simulationsRaw as unknown as Record<string, unknown>[]);

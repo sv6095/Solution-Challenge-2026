@@ -1279,6 +1279,7 @@ function useSessionCachedQuery<T>({
     queryFn,
     staleTime,
     refetchInterval,
+    refetchIntervalInBackground: false,
     enabled,
     initialData,
     placeholderData: (previousData) => previousData,
@@ -1846,11 +1847,11 @@ export default function NetworkView() {
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   /* ── Data queries ───────────────────────────────────────────── */
-  const { data: suppRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-suppliers", queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000, refetchInterval:30000 });
-  const { data: evtsRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-events", queryKey:["risks","events"], queryFn:()=>api.risks.events(), staleTime:120_000, refetchInterval:30000 });
+  const { data: suppRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-suppliers", queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000, refetchInterval:120000 });
+  const { data: evtsRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-events", queryKey:["risks","events"], queryFn:()=>api.risks.events(), staleTime:120_000, refetchInterval:120000 });
   const { data: globalBundle }  = useGlobalDashboardBundle();
-  const { data: auditList=[] }  = useSessionCachedQuery({ cacheKey: "audit-list", queryKey:["audit","list"], queryFn:()=>api.audit.list(), staleTime:300_000, refetchInterval:30000 });
-  const { data: gapReport }     = useSessionCachedQuery({ cacheKey: "intel-gaps", queryKey:["intel","gaps"], queryFn:()=>api.intelligence.gaps(), staleTime:120_000, refetchInterval:30000 });
+  const { data: auditList=[] }  = useSessionCachedQuery({ cacheKey: "audit-list", queryKey:["audit","list"], queryFn:()=>api.audit.list(), staleTime:300_000, refetchInterval:120000 });
+  const { data: gapReport }     = useSessionCachedQuery({ cacheKey: "intel-gaps", queryKey:["intel","gaps"], queryFn:()=>api.intelligence.gaps(), staleTime:120_000, refetchInterval:120000 });
 
   /* ── User Context (Logistics Nodes) ────────────────────────── */
   const userId = useMemo(() => getUserId(), []);

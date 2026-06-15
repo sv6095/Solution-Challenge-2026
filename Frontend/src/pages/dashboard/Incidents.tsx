@@ -205,12 +205,12 @@ const Incidents = () => {
   const { data: incidentsRaw = [] } = useQuery({
     queryKey: ["incidents", statusFilter],
     queryFn: () => fetchIncidents(fetchStatusParam),
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
   const { data: simulationIncidentsRaw = [] } = useQuery({
     queryKey: ["intelligence", "simulation-incidents", statusFilter],
     queryFn: () => fetchSimulationIncidents(fetchStatusParam),
-    refetchInterval: 15_000,
+    refetchInterval: 60_000,
   });
 
   const incidentsAll: Record<string, unknown>[] = useMemo(() => {

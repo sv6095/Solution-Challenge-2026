@@ -24,7 +24,17 @@ const Compliance = lazy(() => import("@/pages/dashboard/Compliance"));
 const SettingsPage = lazy(() => import("./pages/dashboard/SettingsPage"));
 const RouteViewer = lazy(() => import("@/pages/dashboard/RouteViewer"));
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // Prevent hidden tabs from continuously polling expensive backend endpoints.
+      refetchIntervalInBackground: false,
+      refetchOnWindowFocus: false,
+      refetchOnReconnect: true,
+      retry: 1,
+    },
+  },
+});
 
 // Premium, elegant skeleton loader placeholder matching design variables
 const PageLoader = () => (
