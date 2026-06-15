@@ -179,8 +179,8 @@ export default function RouteViewer() {
     : 4;
 
   /* ── Fetch cost for a mode ──────────────────────────────────────────────── */
-  const fetchCost = useCallback(async (mode: string, distance_km: number) => {
-    if (!distance_km || costs[mode]) return;
+  const fetchCost = useCallback(async (mode: string, distance_km: number, key: string) => {
+    if (!distance_km || costs[key]) return;
     try {
       const res = await fetch(`${BASE}/route-cost`, {
         method: "POST",
@@ -189,7 +189,7 @@ export default function RouteViewer() {
       });
       if (res.ok) {
         const data = await res.json();
-        setCosts(prev => ({ ...prev, [mode]: data }));
+        setCosts(prev => ({ ...prev, [key]: data }));
       }
     } catch { /* silent */ }
   }, [costs]);
@@ -211,7 +211,7 @@ export default function RouteViewer() {
         ? `Eurostat searoute v1.6 (real maritime lanes)`
         : `Maritime waypoint graph (${(data.waypoints || []).length} chokepoints)`;
       setSourceMeta(prev => ({ ...prev, sea: lbl }));
-      fetchCost("sea", data.distance_km);
+      fetchCost("sea", data.distance_km, "sea");
     } catch (e: any) {
       setError("Sea route API unavailable.");
     } finally { setLoading(false); }
@@ -238,7 +238,7 @@ export default function RouteViewer() {
         setLandDist(data.distance_km);
         setLandDuration(data.duration_hours);
         setSourceMeta(prev => ({ ...prev, land: data.source_label || data.source || "OSRM" }));
-        fetchCost("land", data.distance_km);
+        fetchCost("land", data.distance_km, "land");
       }
     } catch (e: any) {
       setError("Land route API unavailable.");
@@ -261,7 +261,11 @@ export default function RouteViewer() {
       if (data.source_label) {
         setSourceMeta(prev => ({ ...prev, air: data.source_label }));
       }
-      fetchCost("air", data.via_hubs.distance_km);
+      // Fetch costs for both routes immediately
+      fetchCost("air", data.via_hubs.distance_km, "air-0");
+      if (data.via_alt_hub) {
+        fetchCost("air", data.via_alt_hub.distance_km, "air-1");
+      }
     } catch (e: any) {
       setError("Air route API unavailable.");
     } finally { setLoading(false); }
@@ -319,7 +323,8 @@ export default function RouteViewer() {
     activeDist = airRouteOptions[activeAirRoute]?.dist ?? directKm;
   }
 
-  const activeCost = costs[activeMode];
+  const activeCostKey = activeMode === "air" ? `air-${activeAirRoute}` : activeMode;
+  const activeCost = costs[activeCostKey];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "calc(100vh - 120px)", background: "#f8fafc", fontFamily: "Inter, system-ui, sans-serif" }}>
