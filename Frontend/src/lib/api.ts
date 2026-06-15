@@ -22,6 +22,7 @@ const DISPLAY_NAME_KEY = "display_name";
 const PERSISTENCE_KEY = "auth_persistence";
 /** `local` = backend JWT from email/password; `firebase` = Firebase ID token (e.g. Google sign-in). */
 const AUTH_KIND_KEY = "auth_kind";
+const REQUEST_TIMEOUT_MS = 12_000;
 
 export type AuthKind = "local" | "firebase";
 
@@ -54,7 +55,16 @@ export function getRefreshToken(): string {
 }
 
 export function getUserId(): string {
-  return readStoredValue(USER_ID_KEY);
+  const stored = readStoredValue(USER_ID_KEY).trim();
+  if (stored) return stored;
+  const token = getAccessToken();
+  if (!token) return "";
+  const payload = decodeJwtPayload(token);
+  const inferred = String(payload?.sub ?? payload?.user_id ?? payload?.uid ?? "").trim();
+  if (inferred) {
+    writeStoredValue(USER_ID_KEY, inferred, getAuthPersistence());
+  }
+  return inferred;
 }
 
 function decodeJwtPayload(token: string): Record<string, unknown> | null {
@@ -127,6 +137,19 @@ export function clearAuthSession(): void {
 
 let refreshPromise: Promise<string | null> | null = null;
 
+async function fetchWithTimeout(input: string, init: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function isPublicPath(path: string): boolean {
   return (
     path === "/auth/login" ||
@@ -174,7 +197,7 @@ async function refreshAccessToken(): Promise<string | null> {
     headers.set("X-User-Id", getUserId());
 
     try {
-      const response = await fetch(`${BASE}/auth/refresh`, {
+      const response = await fetchWithTimeout(`${BASE}/auth/refresh`, {
         method: "POST",
         headers,
         body: JSON.stringify({ refresh_token: refreshToken }),
@@ -230,12 +253,15 @@ async function request<T>(path: string, options?: RequestInit, retryOnAuthFailur
   let res: Response;
   try {
     const { headers: _ignoredHeaders, ...restOptions } = options ?? {};
-    res = await fetch(`${BASE}${path}`, {
+    res = await fetchWithTimeout(`${BASE}${path}`, {
       ...restOptions,
       headers,
     });
-  } catch {
+  } catch (err) {
     const isDev = import.meta.env.DEV;
+    if (err instanceof DOMException && err.name === "AbortError") {
+      throw new Error("Request timed out while verifying authorization. Please retry.");
+    }
     throw new Error(
       isDev
         ? "Backend unreachable. Start FastAPI on 127.0.0.1:8000 or set VITE_API_URL to a live API base."
@@ -862,6 +888,8 @@ export const api = {
     summary: () => request<{ total_workflows: number; avg_response_time_seconds: number; actions_breakdown: Record<string, number> }>("/audit/compliance"),
   },
   incidents: {
+    list: (status?: string) =>
+      request<Array<Record<string, unknown>>>(`/incidents${status ? `?status=${encodeURIComponent(status)}` : ""}`),
     summary: () => request<{ critical_count: number; watch_count: number; resolved_count: number; nominal_nodes: number; total_nodes: number }>("/incidents/summary"),
     briefing: () => request<CommandBriefing>("/command/briefing"),
     generate: () => request<Record<string, unknown>>("/incidents/generate", { method: "POST" }),

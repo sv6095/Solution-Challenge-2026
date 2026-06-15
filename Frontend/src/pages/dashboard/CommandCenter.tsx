@@ -6,8 +6,8 @@ import {
 } from "@/components/ui/map";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
-import { filterFreshIncidents } from "@/lib/incident-freshness";
 import { incidentCategoryLabel, incidentCategoryColor } from "@/lib/incident-category";
+import { incidentDisplayTitle, incidentContextTag } from "@/lib/incident-title";
 import React from "react";
 import {
   RefreshCw, Target, Shield, Network,
@@ -230,6 +230,16 @@ const CommandCenter = () => {
     queryFn: () => api.incidents.briefing(),
     refetchInterval: 30_000,
   });
+  const { data: incidentsRaw = [], isLoading: isIncidentsLoading } = useQuery({
+    queryKey: ["incidents", "command-center-active"],
+    queryFn: () => api.incidents.list(),
+    refetchInterval: 30_000,
+  });
+  const { data: simulationIncidentsRaw = [], isLoading: isSimulationLoading } = useQuery({
+    queryKey: ["intelligence", "simulation-incidents", "command-center"],
+    queryFn: () => api.intelligence.simulationIncidents(),
+    refetchInterval: 30_000,
+  });
 
   const generate = useMutation({
     mutationFn: () => api.incidents.generate(),
@@ -240,10 +250,29 @@ const CommandCenter = () => {
   const health = b.network_health || {};
   const totalNodes = b.total_nodes || 0;
 
-  const activePool = (b.active_incidents?.length
+  const mergedLivePool = useMemo(() => {
+    const activeStatuses = new Set(["DETECTED", "ANALYZED", "AWAITING_APPROVAL"]);
+    const merged = [...(incidentsRaw as Record<string, unknown>[]), ...(simulationIncidentsRaw as Record<string, unknown>[])];
+    const seen = new Set<string>();
+    const out: Record<string, unknown>[] = [];
+    for (const inc of merged) {
+      const status = String(inc.status || "").toUpperCase();
+      if (!activeStatuses.has(status)) continue;
+      const id = String(inc.id || inc.incident_id || "");
+      const fallback = `${String(inc.event_title || inc.title || "").toLowerCase()}|${String(inc.created_at || "")}`;
+      const key = id || fallback;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      out.push(inc);
+    }
+    return out;
+  }, [incidentsRaw, simulationIncidentsRaw]);
+
+  const briefingPool = (b.active_incidents?.length
     ? b.active_incidents
     : [...(b.critical_incidents || []), ...(b.watch_incidents || [])]) as Record<string, unknown>[];
-  const incidents = filterFreshIncidents(activePool);
+  const activePool = mergedLivePool.length > 0 ? mergedLivePool : briefingPool;
+  const incidents = activePool;
   const listedCriticalCount = incidents.filter((inc) => ["CRITICAL", "HIGH"].includes(String(inc.severity || "").toUpperCase())).length;
   const listedWatchCount = incidents.filter((inc) => ["MODERATE", "MEDIUM", "WARNING", "LOW"].includes(String(inc.severity || "").toUpperCase())).length;
   const criticalCount = Number(b.critical_count ?? listedCriticalCount) || listedCriticalCount;
@@ -380,7 +409,7 @@ const CommandCenter = () => {
                             {incidentCategoryLabel(inc)}
                           </span>
                         </div>
-                        <p className="font-semibold text-sm leading-tight truncate">{inc.event_title}</p>
+                        <p className="font-semibold text-sm leading-tight truncate">{incidentDisplayTitle(inc as Record<string, unknown>)}</p>
                         <p className="text-xs text-muted-foreground">Exposure: <span className="font-semibold text-foreground">{fmtINR(inc.total_exposure_usd || 0)}</span></p>
                         <Button size="sm" onClick={() => setSelectedId(String(inc.id))} className="w-full h-7 text-xs">View Details</Button>
                       </div>
@@ -414,7 +443,7 @@ const CommandCenter = () => {
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
               <div>
                 <p className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Incident Title</p>
-                <p className="text-sm font-semibold leading-snug">{String(selectedIncident.event_title || "Unknown Event")}</p>
+                <p className="text-sm font-semibold leading-snug">{incidentDisplayTitle(selectedIncident as Record<string, unknown>)}</p>
               </div>
               <div>
                 <p className="text-[9px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Affected Nodes</p>
@@ -487,7 +516,7 @@ const CommandCenter = () => {
                 {incidents.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="px-4 py-10 text-center text-muted-foreground">
-                      {isLoading ? "Loading telemetry..." : "No incidents detected."}
+                      {isLoading || isIncidentsLoading || isSimulationLoading ? "Loading telemetry..." : "No incidents detected."}
                     </td>
                   </tr>
                 ) : incidents.map((inc: any, i: number) => {
@@ -516,7 +545,12 @@ const CommandCenter = () => {
                           {incidentCategoryLabel(inc)}
                         </span>
                       </td>
-                      <td className="px-4 py-3 font-medium truncate max-w-[300px]">{inc.event_title || "Unknown"}</td>
+                      <td className="px-4 py-3 font-medium max-w-[300px]">
+                        <p className="truncate">{incidentDisplayTitle(inc as Record<string, unknown>)}</p>
+                        {incidentContextTag(inc as Record<string, unknown>) && (
+                          <p className="text-[10px] text-muted-foreground truncate">{incidentContextTag(inc as Record<string, unknown>)}</p>
+                        )}
+                      </td>
                       <td className="px-4 py-3 tabular-nums">{inc.affected_node_count || 1}</td>
                       <td className="px-4 py-3 font-semibold tabular-nums">{fmtINR(inc.total_exposure_usd || 0)}</td>
                       <td className="px-4 py-3 text-muted-foreground">{inc.min_stockout_days ? `${inc.min_stockout_days}d` : "—"}</td>

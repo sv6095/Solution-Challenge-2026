@@ -2997,7 +2997,14 @@ async def api_list_incidents(status: str | None = None, user=Depends(verify_fire
     _maybe_purge_stale(tenant_id)
     resource_tenant = tenant_id
     _require_incident_permission(user, Permission.INCIDENT_READ, resource_tenant)
-    return list_incidents(status=status, limit=100, tenant_id=tenant_id)
+    normalized_status = str(status or "").strip().upper() or None
+    if normalized_status == "ACTIVE":
+        active_statuses = {"DETECTED", "ANALYZED", "AWAITING_APPROVAL"}
+        return [
+            inc for inc in list_incidents(status=None, limit=500, tenant_id=tenant_id)
+            if str(inc.get("status") or "").strip().upper() in active_statuses
+        ]
+    return list_incidents(status=normalized_status, limit=500, tenant_id=tenant_id)
 
 
 @app.get("/api/incidents/summary")
@@ -3063,7 +3070,14 @@ async def api_list_monte_carlo_incidents(
     """List simulation-only incidents created from Intelligence Monte Carlo runs."""
     tenant_id = _resolved_request_tenant(user)
     _require_incident_permission(user, Permission.INCIDENT_READ, tenant_id)
-    return list_simulation_incidents(status=status, limit=100, tenant_id=tenant_id)
+    normalized_status = str(status or "").strip().upper() or None
+    if normalized_status == "ACTIVE":
+        active_statuses = {"DETECTED", "ANALYZED", "AWAITING_APPROVAL"}
+        return [
+            inc for inc in list_simulation_incidents(status=None, limit=500, tenant_id=tenant_id)
+            if str(inc.get("status") or "").strip().upper() in active_statuses
+        ]
+    return list_simulation_incidents(status=normalized_status, limit=500, tenant_id=tenant_id)
 
 
 @app.post("/api/incidents/{incident_id}/approve")

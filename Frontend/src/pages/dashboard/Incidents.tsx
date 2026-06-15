@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import {
   AlertTriangle, ChevronRight, Clock, IndianRupee, MapPin,
@@ -16,8 +16,8 @@ import { motion, AnimatePresence } from "motion/react";
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
 import { getAccessToken, getUserId } from "@/lib/api";
-import { filterFreshIncidents } from "@/lib/incident-freshness";
 import { incidentCategoryLabel, incidentCategoryColor } from "@/lib/incident-category";
+import { incidentDisplayTitle } from "@/lib/incident-title";
 import { fmtINR } from "@/lib/currency";
 
 function authHeaders(): HeadersInit {
@@ -38,6 +38,8 @@ async function authFetch<T>(url: string, options?: RequestInit): Promise<T> {
 
 const fetchIncidents = (status?: string) =>
   authFetch<unknown[]>(`${BASE}/incidents${status ? `?status=${status}` : ""}`);
+const fetchSimulationIncidents = (status?: string) =>
+  authFetch<unknown[]>(`${BASE}/intelligence/monte-carlo/incidents${status ? `?status=${status}` : ""}`);
 
 interface AffectedNode {
   id: string; name: string; location: string; tier: number;
@@ -135,6 +137,7 @@ function IncidentCard({ incident, isSelected, onClick }: { incident: any; isSele
   const sev = SEV_META[String(incident.severity)] ?? SEV_META.LOW;
   const stat = STATUS_META[String(incident.status)] ?? STATUS_META.DISMISSED;
   const isUrgent = incident.status === "AWAITING_APPROVAL";
+  const displayTitle = incidentDisplayTitle(incident as Record<string, unknown>);
   return (
     <motion.div
       layout
@@ -153,7 +156,7 @@ function IncidentCard({ incident, isSelected, onClick }: { incident: any; isSele
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <span className="text-sm font-bold text-slate-900 truncate flex-1 leading-tight">
-              {String(incident.event_title || "Disruption")}
+              {displayTitle}
             </span>
           </div>
           <div className="flex items-center gap-2 flex-wrap mb-2">
@@ -204,17 +207,33 @@ const Incidents = () => {
     queryFn: () => fetchIncidents(fetchStatusParam),
     refetchInterval: 15_000,
   });
-
-  const incidentsAll: Record<string, unknown>[] = Array.isArray(incidentsRaw) ? incidentsRaw as Record<string, unknown>[] : [];
-  const freshIncidents = filterFreshIncidents(incidentsAll).filter((inc, idx, arr) => {
-    const key = String(inc.event_title || inc.title || inc.id || "").trim().toLowerCase();
-    return arr.findIndex((o) => String(o.event_title || o.title || o.id || "").trim().toLowerCase() === key) === idx;
+  const { data: simulationIncidentsRaw = [] } = useQuery({
+    queryKey: ["intelligence", "simulation-incidents", statusFilter],
+    queryFn: () => fetchSimulationIncidents(fetchStatusParam),
+    refetchInterval: 15_000,
   });
+
+  const incidentsAll: Record<string, unknown>[] = useMemo(() => {
+    const base = Array.isArray(incidentsRaw) ? incidentsRaw as Record<string, unknown>[] : [];
+    const sim = Array.isArray(simulationIncidentsRaw) ? simulationIncidentsRaw as Record<string, unknown>[] : [];
+    const seen = new Set<string>();
+    const merged: Record<string, unknown>[] = [];
+    for (const inc of [...base, ...sim]) {
+      const id = String(inc.id || inc.incident_id || "").trim();
+      const fallback = `${String(inc.event_title || inc.title || "").trim().toLowerCase()}|${String(inc.created_at || "").trim()}`;
+      const key = id || fallback;
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      merged.push(inc);
+    }
+    merged.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
+    return merged;
+  }, [incidentsRaw, simulationIncidentsRaw]);
   const incidents = (statusFilter === "ACTIVE"
-    ? freshIncidents.filter((inc) => activeStatuses.includes(String(inc.status || "")))
-    : freshIncidents
+    ? incidentsAll.filter((inc) => activeStatuses.includes(String(inc.status || "")))
+    : incidentsAll
   ).filter((inc) =>
-    !search || String(inc.event_title || "").toLowerCase().includes(search.toLowerCase())
+    !search || `${String(inc.event_title || "")} ${String(inc.event_description || "")}`.toLowerCase().includes(search.toLowerCase())
   );
 
   const { data: detail, refetch: refetchDetail } = useQuery<Incident>({
@@ -437,7 +456,7 @@ const Incidents = () => {
                   )}
                 </div>
                 <h2 className="font-headline text-xl font-bold text-slate-900 leading-tight mb-1">
-                  {String(detail.event_title || "Disruption")}
+                  {incidentDisplayTitle(detail as unknown as Record<string, unknown>)}
                 </h2>
                 <div className="flex items-center gap-4 text-[10px] font-mono text-slate-400">
                   <span>Detected {detail.created_at ? timeAgo(String(detail.created_at)) : "—"}</span>
