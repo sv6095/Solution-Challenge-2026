@@ -36,11 +36,12 @@ interface CostData {
   mode: string; distance_km: number;
 }
 
+
+
 const MODE_META = {
   air:    { label: "Air Freight",    icon: Plane,  color: "#dc2626", bg: "#fef2f2", border: "#fecaca", speed: "Fastest",    co2: "High"   },
   sea:    { label: "Sea Freight",    icon: Ship,   color: "#2563eb", bg: "#eff6ff", border: "#bfdbfe", speed: "Slowest",    co2: "Lowest" },
   land:   { label: "Land / Road",   icon: Truck,  color: "#16a34a", bg: "#f0fdf4", border: "#bbf7d0", speed: "Moderate",   co2: "Medium" },
-  hybrid: { label: "Hybrid",        icon: Navigation, color: "#7c3aed", bg: "#faf5ff", border: "#e9d5ff", speed: "Balanced", co2: "Low"  },
 };
 
 /* ── Haversine ─────────────────────────────────────────────────────────────── */
@@ -136,6 +137,8 @@ export default function RouteViewer() {
   );
   const [loading, setLoading] = useState(false);
   const [error, setError]     = useState<string | null>(null);
+
+
 
   // Route data per mode
   const [seaCoords,    setSeaCoords]    = useState<[number,number][] | null>(null);
@@ -244,7 +247,7 @@ export default function RouteViewer() {
       if (data.source_label) {
         setSourceMeta(prev => ({ ...prev, air: data.source_label }));
       }
-      fetchCost("air", data.direct.distance_km);
+      fetchCost("air", data.via_hubs.distance_km);
     } catch (e: any) {
       setError("Air route API unavailable.");
     } finally { setLoading(false); }
@@ -255,7 +258,6 @@ export default function RouteViewer() {
     if (activeMode === "sea")    fetchSea();
     if (activeMode === "land")   fetchLand();
     if (activeMode === "air")    fetchAir();
-    if (activeMode === "hybrid") { fetchSea(); fetchLand(); fetchCost("hybrid", directKm); }
   }, [activeMode]); // eslint-disable-line
 
   /* ── Map ease-to on mode switch ──────────────────────────────────────────── */
@@ -295,18 +297,12 @@ export default function RouteViewer() {
     }
   } else if (activeMode === "air" && airData) {
     const airRouteOptions = [
-      { label: "Direct Great Circle", coords: airData.direct.coordinates, color: "#dc2626", dist: airData.direct.distance_km },
       { label: `Via ${airData.via_hubs.origin_hub?.city ?? "Hub"} → ${airData.via_hubs.dest_hub?.city ?? "Hub"}`, coords: airData.via_hubs.coordinates, color: "#f59e0b", dist: airData.via_hubs.distance_km, dash: [8,4] as [number,number] },
       ...(airData.via_alt_hub ? [{ label: `Via ${airData.via_alt_hub.hub?.city ?? "Alt Hub"}`, coords: airData.via_alt_hub.coordinates!, color: "#7c3aed", dist: airData.via_alt_hub.distance_km, dash: [4,4] as [number,number] }] : []),
     ];
     activeRoutes = airRouteOptions.map(r => ({ label: r.label, coords: r.coords, color: r.color, dash: r.dash }));
     activeCoords = airRouteOptions[activeAirRoute]?.coords ?? airRouteOptions[0]?.coords ?? [];
     activeDist = airRouteOptions[activeAirRoute]?.dist ?? directKm;
-  } else if (activeMode === "hybrid") {
-    // Combine sea + land segments
-    if (seaCoords) activeRoutes.push({ label: "Sea Leg", coords: seaCoords, color: "#2563eb" });
-    if (landCoords && landViable) activeRoutes.push({ label: "Land Leg", coords: landCoords, color: "#16a34a", dash: [6,3] });
-    activeDist = (seaDist * 0.7) + (landDist * 0.3);
   }
 
   const activeCost = costs[activeMode];
@@ -394,12 +390,12 @@ export default function RouteViewer() {
             ref={mapRef}
             theme="light"
             styles={{
-              light: "https://tiles.openfreemap.org/styles/bright",
-              dark: "https://tiles.openfreemap.org/styles/bright",
+              light: "https://tiles.openfreemap.org/styles/liberty",
+              dark: "https://tiles.openfreemap.org/styles/liberty",
             }}
             center={center}
             zoom={zoom}
-            pitch={0}
+            pitch={60}
             bearing={0}
             className="w-full h-full"
           >
@@ -484,6 +480,8 @@ export default function RouteViewer() {
               ))}
             </div>
           )}
+
+
         </div>
 
         {/* ── Side panel ──────────────────────────────────────────────────── */}
@@ -560,7 +558,6 @@ export default function RouteViewer() {
                       <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
                         <span style={{ width: 10, height: 10, borderRadius: "50%", background: r.color, flexShrink: 0, display: "inline-block" }} />
                         <span style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>{r.label}</span>
-                        {i === 0 && <span style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, padding: "1px 6px" }}>DIRECT</span>}
                       </div>
                     </div>
                   );
