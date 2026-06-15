@@ -23,6 +23,7 @@ const PERSISTENCE_KEY = "auth_persistence";
 /** `local` = backend JWT from email/password; `firebase` = Firebase ID token (e.g. Google sign-in). */
 const AUTH_KIND_KEY = "auth_kind";
 const REQUEST_TIMEOUT_MS = 12_000;
+const LONG_REQUEST_TIMEOUT_MS = 90_000;
 
 export type AuthKind = "local" | "firebase";
 
@@ -226,7 +227,11 @@ async function refreshAccessToken(): Promise<string | null> {
   return refreshPromise;
 }
 
-async function request<T>(path: string, options?: RequestInit, retryOnAuthFailure = true): Promise<T> {
+async function request<T>(
+  path: string,
+  options?: RequestInit & { timeoutMs?: number },
+  retryOnAuthFailure = true,
+): Promise<T> {
   const userId = getUserId();
   const token = getAccessToken();
   if (!token && !isPublicPath(path)) {
@@ -252,15 +257,15 @@ async function request<T>(path: string, options?: RequestInit, retryOnAuthFailur
   }
   let res: Response;
   try {
-    const { headers: _ignoredHeaders, ...restOptions } = options ?? {};
+    const { headers: _ignoredHeaders, timeoutMs, ...restOptions } = options ?? {};
     res = await fetchWithTimeout(`${BASE}${path}`, {
       ...restOptions,
       headers,
-    });
+    }, timeoutMs);
   } catch (err) {
     const isDev = import.meta.env.DEV;
     if (err instanceof DOMException && err.name === "AbortError") {
-      throw new Error("Request timed out while verifying authorization. Please retry.");
+      throw new Error("Request timed out. Please retry.");
     }
     throw new Error(
       isDev
@@ -897,10 +902,14 @@ export const api = {
   intelligence: {
     gaps: () => request<IntelligenceGapResponse>("/intelligence/gaps"),
     monteCarlo: (payload: IntelligenceMonteCarloRequest) =>
-      request<IntelligenceMonteCarloResponse>("/intelligence/monte-carlo", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      }),
+      request<IntelligenceMonteCarloResponse>(
+        "/intelligence/monte-carlo",
+        {
+          method: "POST",
+          body: JSON.stringify(payload),
+          timeoutMs: LONG_REQUEST_TIMEOUT_MS,
+        },
+      ),
     simulationIncidents: (status?: string) =>
       request<IntelligenceSimulationIncident[]>(
         `/intelligence/monte-carlo/incidents${status ? `?status=${encodeURIComponent(status)}` : ""}`,
