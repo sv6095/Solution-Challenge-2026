@@ -147,8 +147,11 @@ def _db_upsert(table: str, key: str, data: Any) -> None:
 def db_read(key: str) -> Any | None:
     """Read a cached payload. Returns None if not found."""
     now = time.monotonic()
+    stale_payload: dict[str, Any] | None = None
     with _READ_CACHE_LOCK:
         cached = _READ_CACHE.get(key)
+        if cached:
+            stale_payload = cached[1]
         if cached and cached[0] > now:
             return cached[1]
     try:
@@ -161,6 +164,9 @@ def db_read(key: str) -> Any | None:
             _READ_CACHE[key] = (now + _READ_CACHE_TTL_SECONDS, payload)
         return payload
     except Exception:
+        # If Firestore read fails, serve last known payload instead of dropping data to empty.
+        if stale_payload is not None:
+            return stale_payload
         return None
 
 

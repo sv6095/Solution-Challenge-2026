@@ -128,7 +128,7 @@ from services.worldmonitor_fetcher import (
 )
 
 init_store()
-if os.getenv("ENABLE_IN_PROCESS_SCHEDULERS", "false").strip().lower() in {"1", "true", "yes"}:
+if os.getenv("ENABLE_IN_PROCESS_SCHEDULERS", "true").strip().lower() in {"1", "true", "yes"}:
     start_signal_scheduler()
 chatbot_manager = ChatbotManager()
 workflow_graph_manager = WorkflowGraphManager()
@@ -192,7 +192,7 @@ def _enqueue_celery_task(task_name: str, *args: Any, **kwargs: Any) -> dict[str,
 async def _start_worldmonitor_cron():
     """Initialize Firebase Admin when configured; start worldmonitor background fetcher."""
     init_firebase_admin_app()
-    if os.getenv("ENABLE_IN_PROCESS_SCHEDULERS", "false").strip().lower() in {"1", "true", "yes"}:
+    if os.getenv("ENABLE_IN_PROCESS_SCHEDULERS", "true").strip().lower() in {"1", "true", "yes"}:
         asyncio.create_task(worldmonitor_cron_loop())
 
 

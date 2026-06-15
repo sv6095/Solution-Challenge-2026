@@ -242,6 +242,7 @@ export function useWSQueryInvalidation(
       ],
       rfq_sent: [["rfq"]],
       worldmonitor_updated: [
+        ["globalDashboardBundle"],
         ["g"],
         ["marketImplications"],
         ["marketQuotes"],
