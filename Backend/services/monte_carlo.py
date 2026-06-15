@@ -33,6 +33,22 @@ def _percentile(values: list[float], pct: float) -> float:
     return float(ordered[idx])
 
 
+def _binomial_confidence_interval(successes: int, runs: int, z: float = 1.96) -> tuple[float, float]:
+    """
+    Return a simple normal-approximation confidence interval in percentage points.
+
+    The simulator UI renders this as a band, so we emit percentages rather than
+    0-1 proportions to avoid an extra conversion step in consumers.
+    """
+    if runs <= 0:
+        return 0.0, 0.0
+    p = max(0.0, min(1.0, successes / runs))
+    margin = z * math.sqrt(max(0.0, p * (1.0 - p)) / runs)
+    low = max(0.0, (p - margin) * 100.0)
+    high = min(100.0, (p + margin) * 100.0)
+    return round(low, 2), round(high, 2)
+
+
 def simulate_incident_monte_carlo(
     incident: dict[str, Any],
     event: dict[str, Any],
@@ -126,15 +142,23 @@ def simulate_incident_monte_carlo(
                 }
             )
 
+    average_delay_days = round(sum(max(0.0, x - stockout_days) for x in arrival_days_list) / runs, 4)
+    expected_exposure_avoided_usd = round(sum(exposure_avoided_list) / runs, 2)
+    confidence_interval_low, confidence_interval_high = _binomial_confidence_interval(protected, runs)
+
     return {
         "runs": runs,
         "seed": seed,
         "route_mode": route_mode,
         "protected_rate": round(protected / runs, 4),
         "route_reliability": round(reliable / runs, 4),
-        "average_delay_days": round(sum(max(0.0, x - stockout_days) for x in arrival_days_list) / runs, 4),
-        "expected_exposure_avoided_usd": round(sum(exposure_avoided_list) / runs, 2),
+        "average_delay_days": average_delay_days,
+        "expected_exposure_avoided_usd": expected_exposure_avoided_usd,
+        "estimated_loss_avoided_usd": expected_exposure_avoided_usd,
+        "expected_delay_days": average_delay_days,
         "worst_case_loss_usd": round(max(loss_list), 2),
+        "confidence_interval_low": confidence_interval_low,
+        "confidence_interval_high": confidence_interval_high,
         "arrival_days_p10": round(_percentile(arrival_days_list, 0.10), 2),
         "arrival_days_p50": round(_percentile(arrival_days_list, 0.50), 2),
         "arrival_days_p90": round(_percentile(arrival_days_list, 0.90), 2),
