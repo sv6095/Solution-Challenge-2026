@@ -36,6 +36,19 @@ function readStoredValue(key: string): string {
   return sessionStorage.getItem(key) || localStorage.getItem(key) || "";
 }
 
+function isLikelyJwtToken(value: string): boolean {
+  const token = value.trim();
+  if (!token || token.includes(" ")) return false;
+  const parts = token.split(".");
+  if (parts.length !== 3) return false;
+  return parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part));
+}
+
+function removeStoredValue(key: string): void {
+  sessionStorage.removeItem(key);
+  localStorage.removeItem(key);
+}
+
 function writeStoredValue(key: string, value: string, persistence: AuthPersistence): void {
   const primary = persistence === "local" ? localStorage : sessionStorage;
   const secondary = persistence === "local" ? sessionStorage : localStorage;
@@ -48,7 +61,13 @@ function writeStoredValue(key: string, value: string, persistence: AuthPersisten
 }
 
 export function getAccessToken(): string {
-  return readStoredValue(ACCESS_TOKEN_KEY);
+  const token = readStoredValue(ACCESS_TOKEN_KEY).trim();
+  if (!token) return "";
+  if (!isLikelyJwtToken(token)) {
+    removeStoredValue(ACCESS_TOKEN_KEY);
+    return "";
+  }
+  return token;
 }
 
 export function getRefreshToken(): string {
@@ -106,12 +125,17 @@ export function storeAuthSession(payload: {
   authKind?: AuthKind;
   displayName?: string;
 }): void {
+  const accessToken = String(payload.accessToken || "").trim();
+  if (!isLikelyJwtToken(accessToken)) {
+    clearAuthSession();
+    throw new Error("Invalid authentication token received. Please sign in again.");
+  }
   const persistence: AuthPersistence = payload.rememberMe ? "local" : getAuthPersistence();
   const resolvedPersistence: AuthPersistence = payload.rememberMe === undefined ? persistence : (payload.rememberMe ? "local" : "session");
   writeStoredValue(USER_ID_KEY, payload.userId, resolvedPersistence);
-  writeStoredValue(ACCESS_TOKEN_KEY, payload.accessToken, resolvedPersistence);
+  writeStoredValue(ACCESS_TOKEN_KEY, accessToken, resolvedPersistence);
   writeStoredValue(REFRESH_TOKEN_KEY, payload.refreshToken || getRefreshToken(), resolvedPersistence);
-  const displayName = String(payload.displayName ?? "").trim() || inferDisplayName(payload.accessToken) || getDisplayName();
+  const displayName = String(payload.displayName ?? "").trim() || inferDisplayName(accessToken) || getDisplayName();
   writeStoredValue(DISPLAY_NAME_KEY, displayName, resolvedPersistence);
   writeStoredValue(PERSISTENCE_KEY, resolvedPersistence, resolvedPersistence);
   const kind: AuthKind =
@@ -233,9 +257,12 @@ async function request<T>(
   retryOnAuthFailure = true,
 ): Promise<T> {
   const userId = getUserId();
-  const token = getAccessToken();
+  let token = getAccessToken();
   if (!token && !isPublicPath(path)) {
-    throw new Error("Missing Bearer token. Please sign in again.");
+    token = (await refreshAccessToken()) || "";
+    if (!token) {
+      throw new Error("Missing Bearer token. Please sign in again.");
+    }
   }
   const callerHeaders = new Headers(options?.headers);
   const headers = new Headers();

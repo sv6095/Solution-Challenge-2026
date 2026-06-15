@@ -99,6 +99,35 @@ const formatTimeAgo = (timestampStr: string) => {
 };
 
 const PING_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const ONBOARDING_CACHE_PREFIX = "onboarding_status:";
+
+function readCachedOnboardingStatus(tenantId: string): { user_id: string; complete: boolean; updated_at?: string } | null {
+  try {
+    const raw = localStorage.getItem(`${ONBOARDING_CACHE_PREFIX}${tenantId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { user_id?: string; complete?: boolean; updated_at?: string };
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      user_id: String(parsed.user_id || tenantId),
+      complete: Boolean(parsed.complete),
+      updated_at: typeof parsed.updated_at === "string" ? parsed.updated_at : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedOnboardingStatus(
+  tenantId: string,
+  status: { user_id: string; complete: boolean; updated_at?: string } | undefined,
+): void {
+  try {
+    if (!status) return;
+    localStorage.setItem(`${ONBOARDING_CACHE_PREFIX}${tenantId}`, JSON.stringify(status));
+  } catch {
+    // Best-effort cache only.
+  }
+}
 
 const DashboardLayout = () => {
   const location = useLocation();
@@ -121,7 +150,15 @@ const DashboardLayout = () => {
     queryKey: ["onboarding-status", tenantId],
     queryFn: () => api.onboarding.status(tenantId),
     enabled: hasToken && !!tenantId,
+    initialData: hasToken && tenantId ? readCachedOnboardingStatus(tenantId) ?? undefined : undefined,
+    staleTime: 5 * 60 * 1000,
   });
+
+  useEffect(() => {
+    if (tenantId && onboardingStatus) {
+      writeCachedOnboardingStatus(tenantId, onboardingStatus);
+    }
+  }, [tenantId, onboardingStatus]);
 
   useEffect(() => {
     if (!hasToken) {

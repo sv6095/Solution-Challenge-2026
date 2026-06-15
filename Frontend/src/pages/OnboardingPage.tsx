@@ -17,6 +17,36 @@ type Props = {
   returnTo?: string;
 };
 
+const ONBOARDING_CACHE_PREFIX = "onboarding_status:";
+
+function readCachedOnboardingStatus(userId: string): { user_id: string; complete: boolean; updated_at?: string } | null {
+  try {
+    const raw = localStorage.getItem(`${ONBOARDING_CACHE_PREFIX}${userId}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { user_id?: string; complete?: boolean; updated_at?: string };
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      user_id: String(parsed.user_id || userId),
+      complete: Boolean(parsed.complete),
+      updated_at: typeof parsed.updated_at === "string" ? parsed.updated_at : undefined,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedOnboardingStatus(
+  userId: string,
+  status: { user_id: string; complete: boolean; updated_at?: string } | undefined,
+): void {
+  try {
+    if (!status) return;
+    localStorage.setItem(`${ONBOARDING_CACHE_PREFIX}${userId}`, JSON.stringify(status));
+  } catch {
+    // Best-effort cache only.
+  }
+}
+
 export default function OnboardingPage(props: Props) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -57,7 +87,15 @@ export default function OnboardingPage(props: Props) {
     queryKey: ["onboarding-status", userId],
     queryFn: () => api.onboarding.status(userId),
     enabled: hasToken && !!userId,
+    initialData: hasToken && userId ? readCachedOnboardingStatus(userId) ?? undefined : undefined,
+    staleTime: 5 * 60 * 1000,
   });
+
+  useEffect(() => {
+    if (userId && onboardingStatus) {
+      writeCachedOnboardingStatus(userId, onboardingStatus);
+    }
+  }, [userId, onboardingStatus]);
 
   useEffect(() => {
     if (!hasToken) {
