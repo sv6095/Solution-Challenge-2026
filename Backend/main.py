@@ -16,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, WebSocket
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from reportlab.lib.pagesizes import A4
@@ -111,9 +112,6 @@ app.add_middleware(
     expose_headers=["X-Request-Id"],
     max_age=86400,  # Cache CORS preflight for 24h to reduce OPTIONS load.
 )
-@app.websocket("/ws/{tenant_id}")
-async def websocket_endpoint(websocket: WebSocket, tenant_id: str):
-    await ws_handler(websocket, tenant_id)
 
 
 import asyncio
@@ -129,10 +127,9 @@ from services.worldmonitor_fetcher import (
 )
 
 init_store()
-if os.getenv("ENABLE_IN_PROCESS_SCHEDULERS", "true").strip().lower() in {"1", "true", "yes"}:
-    start_signal_scheduler()
 chatbot_manager = ChatbotManager()
 workflow_graph_manager = WorkflowGraphManager()
+_worldmonitor_task: asyncio.Task | None = None
 
 
 def _set_cache_headers(response: Response, *, public: bool, max_age: int = 30) -> None:
@@ -194,7 +191,19 @@ async def _start_worldmonitor_cron():
     """Initialize Firebase Admin when configured; start worldmonitor background fetcher."""
     init_firebase_admin_app()
     if os.getenv("ENABLE_IN_PROCESS_SCHEDULERS", "true").strip().lower() in {"1", "true", "yes"}:
-        asyncio.create_task(worldmonitor_cron_loop())
+        # Start scheduler in app lifecycle (not module import) to avoid side-effects on import/reload.
+        try:
+            start_signal_scheduler()
+        except Exception as exc:
+            logger.exception("signal scheduler startup failed: %s", exc)
+        global _worldmonitor_task
+        _worldmonitor_task = asyncio.create_task(worldmonitor_cron_loop())
+        def _log_task_result(task: asyncio.Task) -> None:
+            try:
+                _ = task.result()
+            except Exception as task_exc:
+                logger.exception("worldmonitor_cron_loop crashed: %s", task_exc)
+        _worldmonitor_task.add_done_callback(_log_task_result)
 
 
 class Coordinates(BaseModel):
@@ -4548,7 +4557,8 @@ async def api_replay_history(user=Depends(verify_firebase_or_local_token)) -> di
 
 async def _cached_global_response(response: Response, suffix: str, producer, ttl_seconds: int = 60) -> Any:
     _set_cache_headers(response, public=True, max_age=30)
-    return await _cached_json(f"api:global:{suffix}", ttl_seconds, producer)
+    data = await _cached_json(f"api:global:{suffix}", ttl_seconds, producer)
+    return jsonable_encoder(data)
 
 
 @app.get("/api/global/hazards")
@@ -4789,15 +4799,15 @@ def _build_global_summary_from_snapshot(snapshot: dict[str, Any]) -> dict[str, A
     conflict = _as_list(snapshot.get("conflict"))
 
     return {
-        "strategic_risk": snapshot["strategic_risk"],
+        "strategic_risk": snapshot.get("strategic_risk", {}),
         "shipping_stress": snapshot.get("shipping_stress", {}),
         "chokepoints": chokepoints[:5],
         "top_instability": instability[:10],
-        "market_implications": snapshot["market_implications"],
+        "market_implications": snapshot.get("market_implications", {}),
         "active_hazards": len(hazards),
         "active_fires": len(fires),
         "conflict_events": len(conflict),
-        "minerals": snapshot["minerals"],
+        "minerals": snapshot.get("minerals", []),
     }
 
 
@@ -4861,12 +4871,17 @@ async def api_global_dashboard_bundle(response: Response):
     Aggregated worldmonitor payload for dashboard screens.
     Replaces many small calls with a single response to reduce overhead.
     """
-    return await _cached_global_response(
-        response,
-        "dashboard-bundle",
-        lambda: _build_global_dashboard_bundle_from_snapshot(get_worldmonitor_bundle_snapshot()),
-        ttl_seconds=60,
-    )
+    try:
+        return await _cached_global_response(
+            response,
+            "dashboard-bundle",
+            lambda: _build_global_dashboard_bundle_from_snapshot(get_worldmonitor_bundle_snapshot()),
+            ttl_seconds=60,
+        )
+    except Exception as exc:
+        logger.exception("dashboard-bundle failed: %s", exc)
+        fallback = _build_global_dashboard_bundle_from_snapshot(get_worldmonitor_bundle_snapshot())
+        return jsonable_encoder(fallback)
 
 
 # ── WebSocket Real-Time Push (Gap 4) ──────────────────────────────────────────
@@ -4875,7 +4890,11 @@ async def api_global_dashboard_bundle(response: Response):
 @app.websocket("/ws/{tenant_id}")
 async def websocket_endpoint(websocket: WebSocket, tenant_id: str):
     """Real-time WebSocket for incident, reasoning, and checkpoint push events."""
-    await ws_handler(websocket, tenant_id)
+    try:
+        await ws_handler(websocket, tenant_id)
+    except Exception as exc:
+        # Prevent websocket path errors from bubbling out of the route handler.
+        logger.warning("websocket endpoint error tenant=%s: %s", tenant_id, exc)
 
 
 @app.get("/api/ws/status")
