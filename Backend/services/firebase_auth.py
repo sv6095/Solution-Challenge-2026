@@ -56,11 +56,16 @@ def init_firebase_admin_app() -> None:
         cred_path = ""
 
     try:
+        options = {}
+        project_id = os.getenv("FIREBASE_PROJECT_ID", "").strip()
+        if project_id:
+            options["projectId"] = project_id
+
         if cred_path and os.path.isfile(cred_path):
-            firebase_admin.initialize_app(credentials.Certificate(cred_path))
+            firebase_admin.initialize_app(credentials.Certificate(cred_path), options=options)
             logger.info("Firebase Admin initialized from service account file")
         else:
-            firebase_admin.initialize_app()
+            firebase_admin.initialize_app(options=options)
             logger.info("Firebase Admin initialized with application default credentials")
     except Exception as exc:
         if auth_provider == "firebase":
