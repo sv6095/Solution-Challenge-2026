@@ -106,9 +106,8 @@ from models.supply_graph import CustomerSupplyGraph
 
 app = FastAPI(title="SupplyShield API", version="0.2.0")
 
-_DEV_ORIGINS = ["http://localhost:3000", "http://localhost:5173"]
 _env_origins = [o.strip() for o in os.getenv("CORS_ORIGINS", "").split(",") if o.strip()]
-_CORS_ORIGINS = list(dict.fromkeys(_DEV_ORIGINS + _env_origins))
+_CORS_ORIGINS = list(dict.fromkeys(_env_origins))
 
 app.add_middleware(
     CORSMiddleware,
