@@ -262,7 +262,7 @@ export default function RouteViewer() {
 
   /* ── Map ease-to on mode switch ──────────────────────────────────────────── */
   useEffect(() => {
-    mapRef.current?.easeTo({ center, zoom, duration: 800 });
+    mapRef.current?.easeTo({ center, zoom, pitch: activeMode === "land" ? 60 : 0, duration: 800 });
   }, [activeMode]); // eslint-disable-line
 
   if (!hasCoords) {
@@ -389,13 +389,20 @@ export default function RouteViewer() {
           <Map
             ref={mapRef}
             theme="light"
-            styles={{
-              light: "https://tiles.openfreemap.org/styles/liberty",
-              dark: "https://tiles.openfreemap.org/styles/liberty",
-            }}
+            styles={
+              activeMode === "land"
+                ? {
+                    light: "https://tiles.openfreemap.org/styles/liberty",
+                    dark: "https://tiles.openfreemap.org/styles/liberty",
+                  }
+                : {
+                    light: "https://tiles.openfreemap.org/styles/bright",
+                    dark: "https://tiles.openfreemap.org/styles/bright",
+                  }
+            }
             center={center}
             zoom={zoom}
-            pitch={60}
+            pitch={activeMode === "land" ? 60 : 0}
             bearing={0}
             className="w-full h-full"
           >
