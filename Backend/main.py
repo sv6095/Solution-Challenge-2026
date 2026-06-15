@@ -2780,14 +2780,28 @@ async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[st
         inc for inc in list_simulation_incidents(status=None, limit=200, tenant_id=tenant_id)
         if str(inc.get("status") or "").upper() in active_statuses
     ]
-    seen_incident_ids: set[str] = set()
-    active_incidents: list[dict[str, Any]] = []
+    def _severity_rank(value: Any) -> int:
+        sev = str(value or "").strip().upper()
+        return {"CRITICAL": 4, "HIGH": 3, "ANALYZED": 2, "MODERATE": 2, "LOW": 1}.get(sev, 0)
+
+    merged_by_id: dict[str, dict[str, Any]] = {}
     for inc in [*operational_incidents, *simulation_incidents]:
         inc_id = str(inc.get("id") or inc.get("incident_id") or "").strip()
-        if not inc_id or inc_id in seen_incident_ids:
+        if not inc_id:
             continue
-        seen_incident_ids.add(inc_id)
-        active_incidents.append(inc)
+        existing = merged_by_id.get(inc_id)
+        if existing is None:
+            merged_by_id[inc_id] = inc
+            continue
+        existing_count = int(existing.get("affected_node_count") or 0)
+        candidate_count = int(inc.get("affected_node_count") or 0)
+        existing_nodes = existing.get("affected_nodes") if isinstance(existing.get("affected_nodes"), list) else []
+        candidate_nodes = inc.get("affected_nodes") if isinstance(inc.get("affected_nodes"), list) else []
+        existing_score = (existing_count, len(existing_nodes), _severity_rank(existing.get("severity")))
+        candidate_score = (candidate_count, len(candidate_nodes), _severity_rank(inc.get("severity")))
+        if candidate_score > existing_score:
+            merged_by_id[inc_id] = inc
+    active_incidents: list[dict[str, Any]] = list(merged_by_id.values())
     disruptions = []
     for inc in active_incidents:
         event_payload = inc.get("event") if isinstance(inc.get("event"), dict) else {}

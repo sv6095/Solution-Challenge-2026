@@ -253,19 +253,34 @@ const CommandCenter = () => {
   const mergedLivePool = useMemo(() => {
     const activeStatuses = new Set(["DETECTED", "ANALYZED", "AWAITING_APPROVAL"]);
     const merged = [...(incidentsRaw as Record<string, unknown>[]), ...(simulationIncidentsRaw as Record<string, unknown>[])];
-    const seen = new Set<string>();
-    const out: Record<string, unknown>[] = [];
+    const outByKey = new Map<string, Record<string, unknown>>();
+    const quality = (inc: Record<string, unknown>) => ({
+      count: Number(inc.affected_node_count || 0),
+      nodes: Array.isArray(inc.affected_nodes) ? inc.affected_nodes.length : 0,
+      severity: (() => {
+        const sev = String(inc.severity || "").toUpperCase();
+        return sev === "CRITICAL" ? 4 : sev === "HIGH" ? 3 : sev === "MODERATE" ? 2 : sev === "LOW" ? 1 : 0;
+      })(),
+    });
     for (const inc of merged) {
       const status = String(inc.status || "").toUpperCase();
       if (!activeStatuses.has(status)) continue;
       const id = String(inc.id || inc.incident_id || "");
       const fallback = `${String(inc.event_title || inc.title || "").toLowerCase()}|${String(inc.created_at || "")}`;
       const key = id || fallback;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      out.push(inc);
+      if (!key) continue;
+      const existing = outByKey.get(key);
+      if (!existing) {
+        outByKey.set(key, inc);
+        continue;
+      }
+      const a = quality(existing);
+      const b = quality(inc);
+      if (b.count > a.count || (b.count === a.count && b.nodes > a.nodes) || (b.count === a.count && b.nodes === a.nodes && b.severity > a.severity)) {
+        outByKey.set(key, inc);
+      }
     }
-    return out;
+    return Array.from(outByKey.values());
   }, [incidentsRaw, simulationIncidentsRaw]);
 
   const briefingPool = (b.active_incidents?.length

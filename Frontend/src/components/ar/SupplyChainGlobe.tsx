@@ -62,7 +62,8 @@ function buildIncidentMarker(
   onClick?: (disruption: ArAssetDisruption) => void,
 ): HTMLElement {
   const el = document.createElement("div");
-  const critical = String(disruption.severity || "").toUpperCase() === "CRITICAL";
+  const sev = String(disruption.severity || "").toUpperCase();
+  const critical = sev === "CRITICAL";
   el.className = "cursor-pointer";
   el.style.transform = "translate(-50%, -50%)";
   el.style.pointerEvents = "auto";

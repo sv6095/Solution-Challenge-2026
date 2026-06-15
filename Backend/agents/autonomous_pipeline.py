@@ -965,7 +965,8 @@ async def _process_single_event(
     total_exposure = 0.0
     min_stockout = 999.0
 
-    for node in gnn_result.affected_nodes:
+    total_affected_nodes = len(gnn_result.affected_nodes)
+    for idx, node in enumerate(gnn_result.affected_nodes):
         dist = _haversine_km(lat, lng, node.lat, node.lng)
         detail_parts = []
         if dist > 0:
@@ -1011,6 +1012,10 @@ async def _process_single_event(
             )
         if min_stockout >= 999:
             min_stockout = 0
+        # The incident card must be produced after all affected nodes are aggregated.
+        # Otherwise we exit early with only the first node represented.
+        if idx < total_affected_nodes - 1:
+            continue
 
         severity_label = _severity_to_label(severity_raw)
         # Escalate to CRITICAL if multiple nodes or high exposure

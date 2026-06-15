@@ -216,16 +216,32 @@ const Incidents = () => {
   const incidentsAll: Record<string, unknown>[] = useMemo(() => {
     const base = Array.isArray(incidentsRaw) ? incidentsRaw as Record<string, unknown>[] : [];
     const sim = Array.isArray(simulationIncidentsRaw) ? simulationIncidentsRaw as Record<string, unknown>[] : [];
-    const seen = new Set<string>();
-    const merged: Record<string, unknown>[] = [];
+    const mergedByKey = new Map<string, Record<string, unknown>>();
+    const quality = (inc: Record<string, unknown>) => ({
+      count: Number(inc.affected_node_count || 0),
+      nodes: Array.isArray(inc.affected_nodes) ? inc.affected_nodes.length : 0,
+      severity: (() => {
+        const sev = String(inc.severity || "").toUpperCase();
+        return sev === "CRITICAL" ? 4 : sev === "HIGH" ? 3 : sev === "MODERATE" ? 2 : sev === "LOW" ? 1 : 0;
+      })(),
+    });
     for (const inc of [...base, ...sim]) {
       const id = String(inc.id || inc.incident_id || "").trim();
       const fallback = `${String(inc.event_title || inc.title || "").trim().toLowerCase()}|${String(inc.created_at || "").trim()}`;
       const key = id || fallback;
-      if (!key || seen.has(key)) continue;
-      seen.add(key);
-      merged.push(inc);
+      if (!key) continue;
+      const existing = mergedByKey.get(key);
+      if (!existing) {
+        mergedByKey.set(key, inc);
+        continue;
+      }
+      const a = quality(existing);
+      const b = quality(inc);
+      if (b.count > a.count || (b.count === a.count && b.nodes > a.nodes) || (b.count === a.count && b.nodes === a.nodes && b.severity > a.severity)) {
+        mergedByKey.set(key, inc);
+      }
     }
+    const merged = Array.from(mergedByKey.values());
     merged.sort((a, b) => String(b.created_at || "").localeCompare(String(a.created_at || "")));
     return merged;
   }, [incidentsRaw, simulationIncidentsRaw]);
