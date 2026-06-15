@@ -20,6 +20,8 @@ export default {
         label: ["Inter", "sans-serif"],
       },
       colors: {
+        "brand-red": "#db1d49",
+        "brand-red-hover": "#c41840",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",
