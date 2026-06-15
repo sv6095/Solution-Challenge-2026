@@ -45,6 +45,7 @@ from services.mailer import send_rfq_email
 from services.data_quality_guard import assess_context_quality
 from services.scenario_confidence import confidence_bounds
 from services.intelligence_gap_tracker import build_intelligence_gap_report
+from services.incident_title_resolver import generate_contextual_incident_title
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -774,6 +775,19 @@ async def _process_single_event(
             # Translation failed — keep original text and continue processing.
             # Better to have a foreign-language incident than to silently drop it.
             pass
+
+    try:
+        title = await generate_contextual_incident_title(
+            event_id=event_id,
+            title=title,
+            description=description,
+            event_type=event_type,
+            location=str(event.get("location") or event.get("region") or event.get("country") or ""),
+            source=str(event.get("source") or ""),
+        )
+    except Exception:
+        # Title enhancement is non-blocking.
+        pass
 
     try:
         severity_raw = float(event.get("severity_raw") or 0)

@@ -13,7 +13,9 @@ ProviderName = Literal["gemini", "groq"]
 T = TypeVar("T", bound=BaseModel)
 
 
-def _prefer() -> ProviderName:
+def _prefer(preferred_provider: ProviderName | None = None) -> ProviderName:
+    if preferred_provider in ("gemini", "groq"):
+        return preferred_provider
     v = (os.getenv("LLM_PROVIDER") or "groq").strip().lower()
     return "gemini" if v == "gemini" else "groq"
 
@@ -105,13 +107,14 @@ async def chat_complete(
     max_tokens: int = 850,
     workflow_id: str | None = None,
     agent_name: str | None = None,
+    preferred_provider: ProviderName | None = None,
 ) -> tuple[str, str]:
     """
     Single entry for LLM completion. Primary model from LLM_PROVIDER (gemini | groq).
     On primary failure, tries the other provider and logs a reasoning step when workflow context is present.
     Returns (text, provider_used).
     """
-    primary = _prefer()
+    primary = _prefer(preferred_provider)
     secondary: ProviderName = "groq" if primary == "gemini" else "gemini"
     wf = (workflow_id or "").strip()
     ag = (agent_name or "").strip() or "assessment_agent"
@@ -158,6 +161,7 @@ async def structured_complete(
     workflow_id: str | None = None,
     agent_name: str | None = None,
     max_tokens: int = 1200,
+    preferred_provider: ProviderName | None = None,
 ) -> T:
     schema = output_model.model_json_schema()
     augmented_prompt = (
@@ -171,6 +175,7 @@ async def structured_complete(
         max_tokens=max_tokens,
         workflow_id=workflow_id,
         agent_name=agent_name,
+        preferred_provider=preferred_provider,
     )
     payload = _extract_json_block(text)
     return output_model.model_validate_json(payload)

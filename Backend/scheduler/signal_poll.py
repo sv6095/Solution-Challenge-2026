@@ -60,6 +60,7 @@ from services.firestore_store import (
 )
 from services.local_store import DB_PATH
 from services.secret_manager import get_secret
+from services.incident_title_resolver import generate_contextual_incident_title
 
 _scheduler: BackgroundScheduler | None = None
 
@@ -426,6 +427,18 @@ async def _poll_sources() -> None:
                         # Translation failed — keep original text and continue processing.
                         # Better to have a foreign-language incident than to silently drop it.
                         pass
+                try:
+                    evt["title"] = await generate_contextual_incident_title(
+                        event_id=str(evt.get("id") or ""),
+                        title=str(evt.get("title") or ""),
+                        description=str(evt.get("description") or ""),
+                        event_type=str(evt.get("event_type") or evt.get("type") or ""),
+                        location=str(evt.get("location") or evt.get("region") or evt.get("country") or ""),
+                        source=str(evt.get("source") or ""),
+                    )
+                except Exception:
+                    # Title enhancement is best-effort and should never block ingestion.
+                    pass
                 
                 inc = incident_engine.process_event(evt, suppliers_for_gnn)
                 if inc:
