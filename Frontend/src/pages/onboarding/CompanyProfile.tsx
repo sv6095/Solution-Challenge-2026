@@ -52,7 +52,7 @@ export default function CompanyProfile({ embedded, data, onChange, onNext }: Com
               2
             </div>
             <span className="text-label-sm uppercase tracking-widest text-slate-500">
-              SupplyChain Core
+              Supply Chain
             </span>
           </div>
         </div>

@@ -25,14 +25,15 @@ export default function SourceSelection({
   return (
     <div id="source-selection-container" className="min-h-screen bg-[#fafafa] flex flex-col justify-between font-sans text-gray-800">
       {/* Upper Brand / Progress Header */}
-      <header id="source-header" className="bg-white border-b border-gray-100 py-6 px-8">
-        <div className="max-w-7xl mx-auto flex flex-col items-center">
-          <span className="font-display font-semibold text-2xl text-gray-900 tracking-tight mb-6">
-            SupplyChain Core
-          </span>
+      <header id="source-header" className="bg-white border-b border-gray-100 py-4 px-8">
+        <div className="max-w-7xl mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src="/Praecantator.png" alt="Logo" className="w-8 h-8 object-contain" />
+            <span className="font-headline text-xl font-bold text-red-500">Praecantator</span>
+          </div>
           
           {/* Custom Step Tracker matching Screen 1 */}
-          <div className="flex items-center space-x-12 relative w-full max-w-lg mt-2">
+          <div className="flex items-center space-x-12 relative w-full max-w-md">
             {/* Step 1 */}
             <div className="flex flex-col items-center flex-1 z-10">
               <span className="w-8 h-8 rounded-none bg-brand-red text-white flex items-center justify-center font-mono text-sm font-semibold mb-2">
@@ -149,7 +150,7 @@ export default function SourceSelection({
               </h3>
               <p className="text-gray-500 text-sm leading-relaxed mb-8 font-sans">
                 Upload a static flat file. Use our intelligent mapping tool to align your raw columns to
-                the SupplyChain Core data model.
+                the Praecantator data model.
               </p>
             </div>
 

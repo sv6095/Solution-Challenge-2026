@@ -159,6 +159,18 @@ export default function RouteViewer() {
 
   const directKm = hasCoords ? hav(fromLat, fromLng, toLat, toLng) : 0;
 
+  // Orient map so it "faces" the destination (user). Bearing is calculated from Destination to Origin.
+  // This places the Origin at the top of the screen and Destination at the bottom, coming towards the viewer.
+  const routeBearing = hasCoords ? (() => {
+    const r = Math.PI / 180;
+    const φ1 = toLat * r;
+    const φ2 = fromLat * r;
+    const Δλ = (fromLng - toLng) * r;
+    const y = Math.sin(Δλ) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(Δλ);
+    return (Math.atan2(y, x) / r + 360) % 360;
+  })() : 0;
+
   const center: [number, number] = hasCoords
     ? [(fromLng + toLng) / 2, (fromLat + toLat) / 2]
     : [78.96, 20.59];
@@ -262,8 +274,8 @@ export default function RouteViewer() {
 
   /* ── Map ease-to on mode switch ──────────────────────────────────────────── */
   useEffect(() => {
-    mapRef.current?.easeTo({ center, zoom, pitch: activeMode === "land" ? 60 : 0, duration: 800 });
-  }, [activeMode]); // eslint-disable-line
+    mapRef.current?.easeTo({ center, zoom, bearing: routeBearing, pitch: activeMode === "land" ? 60 : 45, duration: 800 });
+  }, [activeMode, center, zoom, routeBearing]); // eslint-disable-line
 
   if (!hasCoords) {
     return (
@@ -402,8 +414,8 @@ export default function RouteViewer() {
             }
             center={center}
             zoom={zoom}
-            pitch={activeMode === "land" ? 60 : 0}
-            bearing={0}
+            pitch={activeMode === "land" ? 60 : 45}
+            bearing={routeBearing}
             className="w-full h-full"
           >
             <MapControls position="bottom-right" showZoom showCompass showFullscreen />

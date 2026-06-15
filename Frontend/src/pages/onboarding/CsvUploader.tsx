@@ -107,9 +107,10 @@ export default function CsvUploader({ onBack, onFileUploaded }: CsvUploaderProps
       <header className="bg-white border-b border-gray-100 py-4 px-8 sticky top-0 z-50">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
-            <span className="font-display font-bold text-2xl text-brand-red tracking-tight">
-              SupplyChain Core
-            </span>
+            <div className="flex items-center gap-3 mr-2">
+              <img src="/Praecantator.png" alt="Logo" className="w-8 h-8 object-contain" />
+              <span className="font-headline text-xl font-bold text-red-500">Praecantator</span>
+            </div>
             <div className="h-4 w-[1px] bg-gray-200"></div>
             <div className="flex items-center space-x-2">
               <span className="font-mono text-xs text-gray-400 font-semibold uppercase tracking-wider">

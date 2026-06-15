@@ -8,8 +8,9 @@ import FinalizingScreen from './onboarding/FinalizingScreen';
 import SuccessScreen from './onboarding/SuccessScreen';
 import CompanyProfile, { CompanyProfileData } from './onboarding/CompanyProfile';
 import { SourceType, ERPConfig, NodeItem, FieldMapping, Page } from './onboarding/types';
-import { api, getUserId } from "@/lib/api";
+import { api, getUserId, getAccessToken } from "@/lib/api";
 import { toast } from "sonner";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 
 type Props = {
   embedded?: boolean;
@@ -23,6 +24,28 @@ export default function OnboardingPage(props: Props) {
   const returnTo = (props.returnTo ?? searchParams.get("returnTo")) || "/dashboard";
 
   const userId = useMemo(() => getUserId(), []);
+  const hasToken = useMemo(() => Boolean(getAccessToken()), []);
+  const queryClient = useQueryClient();
+
+  const [currentPage, setCurrentPage] = useState<Page>('COMPANY_PROFILE');
+
+  const { data: onboardingStatus, isLoading: isOnboardingStatusLoading } = useQuery({
+    queryKey: ["onboarding-status", userId],
+    queryFn: () => api.onboarding.status(userId),
+    enabled: hasToken && !!userId,
+  });
+
+  useEffect(() => {
+    if (!hasToken) {
+      navigate("/login");
+    }
+  }, [hasToken, navigate]);
+
+  useEffect(() => {
+    if (hasToken && onboardingStatus?.complete && !embedded && currentPage !== 'SUCCESS_SCREEN') {
+      navigate(returnTo);
+    }
+  }, [hasToken, onboardingStatus, embedded, currentPage, navigate, returnTo]);
 
   // Autofill data
   const [companyProfile, setCompanyProfile] = useState<CompanyProfileData>({
@@ -46,8 +69,27 @@ export default function OnboardingPage(props: Props) {
     }).catch(() => {});
   }, [userId]);
 
-  const [currentPage, setCurrentPage] = useState<Page>('COMPANY_PROFILE');
   const [selectedSource, setSelectedSource] = useState<SourceType>('CSV');
+
+  if (!hasToken) return null;
+
+  if (isOnboardingStatusLoading || (hasToken && !onboardingStatus)) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-[#fafafa]">
+        <div className="relative flex items-center justify-center">
+          <div className="w-12 h-12 rounded-full border-[3px] border-muted/80 border-t-red-600 animate-spin" />
+          <div className="absolute w-6 h-6 rounded-full bg-red-600/10 animate-pulse" />
+        </div>
+        <span className="text-[10px] font-headline font-bold uppercase tracking-[0.2em] text-slate-500 mt-4 animate-pulse">
+          Verifying security authorization...
+        </span>
+      </div>
+    );
+  }
+
+  if (hasToken && onboardingStatus?.complete && !embedded && currentPage !== 'SUCCESS_SCREEN') {
+    return null;
+  }
 
   // Input States Cached during flow
   const [trackerFileName, setTrackerFileName] = useState<string>('suppliers_v2.csv');
@@ -81,7 +123,7 @@ export default function OnboardingPage(props: Props) {
     if (embedded) {
       navigate(returnTo);
     } else {
-      resetFlow();
+      setCurrentPage('COMPANY_PROFILE');
     }
   };
 
@@ -204,6 +246,7 @@ export default function OnboardingPage(props: Props) {
         gmail_oauth_token: null,
         slack_webhook: null,
       });
+      queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
       toast.success("Onboarding complete.");
       setCurrentPage('SUCCESS_SCREEN');
     } catch {
