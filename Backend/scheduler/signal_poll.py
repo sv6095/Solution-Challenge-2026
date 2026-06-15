@@ -4,8 +4,16 @@ import asyncio
 import json
 import os
 import hashlib
+import sys
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 from typing import Any
+
+# Ensure package imports (agents/, services/) resolve in Celery worker contexts.
+# Some worker launch paths do not include the backend root on sys.path.
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 
 def _is_likely_non_english(text: str) -> bool:

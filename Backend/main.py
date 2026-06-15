@@ -4765,42 +4765,82 @@ async def api_global_refresh(user=Depends(verify_firebase_or_local_token)):
 
 
 def _build_global_summary_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    def _as_list(value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        if isinstance(value, dict):
+            nested = value.get("data")
+            if isinstance(nested, list):
+                return nested
+            items = value.get("items")
+            if isinstance(items, list):
+                return items
+            values = value.get("values")
+            if isinstance(values, list):
+                return values
+        return []
+
+    chokepoints = _as_list(snapshot.get("chokepoints"))
+    instability = _as_list(snapshot.get("country_instability"))
+    hazards = _as_list(snapshot.get("hazards"))
+    fires = _as_list(snapshot.get("fires"))
+    conflict = _as_list(snapshot.get("conflict"))
+
     return {
         "strategic_risk": snapshot["strategic_risk"],
-        "shipping_stress": snapshot["shipping_stress"],
-        "chokepoints": snapshot["chokepoints"][:5],
-        "top_instability": snapshot["country_instability"][:10],
+        "shipping_stress": snapshot.get("shipping_stress", {}),
+        "chokepoints": chokepoints[:5],
+        "top_instability": instability[:10],
         "market_implications": snapshot["market_implications"],
-        "active_hazards": len(snapshot["hazards"]),
-        "active_fires": len(snapshot["fires"]),
-        "conflict_events": len(snapshot["conflict"]),
+        "active_hazards": len(hazards),
+        "active_fires": len(fires),
+        "conflict_events": len(conflict),
         "minerals": snapshot["minerals"],
     }
 
 
 def _build_global_dashboard_bundle_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    def _as_list(value: Any) -> list[Any]:
+        if isinstance(value, list):
+            return value
+        if isinstance(value, tuple):
+            return list(value)
+        if isinstance(value, dict):
+            nested = value.get("data")
+            if isinstance(nested, list):
+                return nested
+            items = value.get("items")
+            if isinstance(items, list):
+                return items
+            values = value.get("values")
+            if isinstance(values, list):
+                return values
+        return []
+
     return {
         "summary": _build_global_summary_from_snapshot(snapshot),
-        "hazards": {"data": snapshot["hazards"], "source": "NASA EONET"},
-        "earthquakes": {"data": snapshot["earthquakes"], "source": "USGS"},
-        "conflict": {"data": snapshot["conflict"], "source": "ACLED"},
-        "gdelt": {"data": snapshot["gdelt"], "source": "GDELT"},
-        "disasters": {"data": snapshot["disasters"], "source": "GDACS"},
-        "news": {"data": snapshot["news"], "source": "NewsAPI"},
-        "market_quotes": {"data": snapshot["market_quotes"], "source": "Finnhub"},
-        "energy": {"data": snapshot["energy"], "source": "EIA"},
-        "macro": {"data": snapshot["macro"], "source": "FRED"},
-        "chokepoints": {"data": snapshot["chokepoints"], "source": "Praecantator"},
-        "shipping_stress": snapshot["shipping_stress"],
-        "shipping_indices": {"data": snapshot["shipping_indices"]},
-        "shipping_rates": snapshot["shipping_rates"],
-        "country_instability": {"data": snapshot["country_instability"]},
-        "strategic_risk": snapshot["strategic_risk"],
-        "market_implications": snapshot["market_implications"],
-        "fires": {"data": snapshot["fires"], "source": "NASA FIRMS"},
-        "aviation": {"data": snapshot["aviation"], "source": "AviationStack"},
-        "air_quality": {"data": snapshot["air_quality"], "source": "OpenAQ"},
-        "minerals": {"data": snapshot["minerals"]},
+        "hazards": {"data": _as_list(snapshot.get("hazards")), "source": "NASA EONET"},
+        "earthquakes": {"data": _as_list(snapshot.get("earthquakes")), "source": "USGS"},
+        "conflict": {"data": _as_list(snapshot.get("conflict")), "source": "ACLED"},
+        "gdelt": {"data": _as_list(snapshot.get("gdelt")), "source": "GDELT"},
+        "disasters": {"data": _as_list(snapshot.get("disasters")), "source": "GDACS"},
+        "news": {"data": _as_list(snapshot.get("news")), "source": "NewsAPI"},
+        "market_quotes": {"data": _as_list(snapshot.get("market_quotes")), "source": "Finnhub"},
+        "energy": {"data": snapshot.get("energy", {}), "source": "EIA"},
+        "macro": {"data": snapshot.get("macro", {}), "source": "FRED"},
+        "chokepoints": {"data": _as_list(snapshot.get("chokepoints")), "source": "Praecantator"},
+        "shipping_stress": snapshot.get("shipping_stress", {}),
+        "shipping_indices": {"data": _as_list(snapshot.get("shipping_indices"))},
+        "shipping_rates": snapshot.get("shipping_rates", {}),
+        "country_instability": {"data": _as_list(snapshot.get("country_instability"))},
+        "strategic_risk": snapshot.get("strategic_risk", {}),
+        "market_implications": snapshot.get("market_implications", {}),
+        "fires": {"data": _as_list(snapshot.get("fires")), "source": "NASA FIRMS"},
+        "aviation": {"data": _as_list(snapshot.get("aviation")), "source": "AviationStack"},
+        "air_quality": {"data": _as_list(snapshot.get("air_quality")), "source": "OpenAQ"},
+        "minerals": {"data": snapshot.get("minerals", [])},
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
 
