@@ -712,8 +712,8 @@ function CountryIntelDrawer({
                   <tr key={row.name} style={{ borderTop: "1px solid var(--border-subtle)" }}>
                     <td style={{ padding: "12px 0", color: "var(--text)", fontWeight: 700 }}>{row.name}</td>
                     <td style={{ padding: "12px 0", color: "var(--text-secondary)" }}>{row.calls}</td>
-                    <td style={{ padding: "12px 0", fontWeight: 800, color: row.trend >= 0 ? "#4ade80" : "#ef4444" }}>
-                      {row.trend >= 0 ? "+" : ""}{row.trend.toFixed(1)}%
+                    <td style={{ padding: "12px 0", fontWeight: 800, color: Number(row.trend ?? 0) >= 0 ? "#4ade80" : "#ef4444" }}>
+                      {Number(row.trend ?? 0) >= 0 ? "+" : ""}{Number(row.trend ?? 0).toFixed(1)}%
                     </td>
                     <td style={{ padding: "12px 0", color: "var(--text-secondary)" }}>{row.importDwt}</td>
                     <td style={{ padding: "12px 0", color: "var(--text-secondary)" }}>{row.exportDwt}</td>
@@ -925,8 +925,8 @@ function CountryIntelDrawerV2({
                     <tr key={row.name} className="border-t border-border">
                       <td className="py-3 font-semibold text-foreground">{row.name}</td>
                       <td className="py-3 text-foreground">{row.calls}</td>
-                      <td className={`py-3 font-bold ${row.trend >= 0 ? "text-emerald-500" : "text-red-500"}`}>
-                        {row.trend >= 0 ? "+" : ""}{row.trend.toFixed(1)}%
+                      <td className={`py-3 font-bold ${Number(row.trend ?? 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                        {Number(row.trend ?? 0) >= 0 ? "+" : ""}{Number(row.trend ?? 0).toFixed(1)}%
                       </td>
                       <td className="py-3 text-muted-foreground">{row.importDwt}</td>
                       <td className="py-3 text-muted-foreground">{row.exportDwt}</td>
@@ -2377,7 +2377,7 @@ export default function NetworkView() {
     const out: UA[] = [];
     quakes.filter(q=>q.magnitude>=5).forEach(q => out.push({
       id:q.id, type:"earthquake", priority:q.magnitude>=7?"critical":q.magnitude>=6?"high":"medium",
-      title:`M${q.magnitude.toFixed(1)} Earthquake`, summary:q.place, time:fmtAgo(q.time), lat:q.lat??undefined, lng:q.lng??undefined,
+      title:`M${Number(q.magnitude ?? 0).toFixed(1)} Earthquake`, summary:q.place, time:fmtAgo(q.time), lat:q.lat??undefined, lng:q.lng??undefined,
     }));
     hazards.slice(0,10).forEach(h => out.push({
       id:h.id, type:"hazard", priority:h.severity==="critical"?"critical":h.severity==="high"?"high":h.severity==="medium"?"medium":"low",
@@ -2894,7 +2894,7 @@ export default function NetworkView() {
               {quakes.slice(0,15).map((q,i) => (
                 <div key={q.id+i} style={{ padding:"8px 0", borderBottom:"1px solid var(--border-subtle)" }}>
                   <div style={{ display:"flex", justifyContent:"space-between" }}>
-                    <span style={{ fontSize:13, fontWeight:600, color:"#f97316" }}>M{q.magnitude.toFixed(1)} {q.place}</span>
+                    <span style={{ fontSize:13, fontWeight:600, color:"#f97316" }}>M{Number(q.magnitude ?? 0).toFixed(1)} {q.place}</span>
                     <span style={{ fontSize:11, color:"var(--text-dim)" }}>{fmtAgo(q.time)}</span>
                   </div>
                 </div>
@@ -3088,12 +3088,12 @@ export default function NetworkView() {
                   {quotes.map((q,i) => (
                     <tr key={q.symbol+i}>
                       <td style={{ ...td, color:"var(--text)", fontWeight:700 }}>{q.symbol}</td>
-                      <td style={{ ...td, textAlign:"center" as const, fontWeight:600 }}>{q.price.toFixed(2)}</td>
-                      <td style={{ ...td, textAlign:"center" as const, fontWeight:700, color:q.change_pct>=0?"var(--semantic-normal)":"var(--semantic-critical)" }}>
-                        {q.change_pct>=0?"+":""}{q.change_pct.toFixed(2)}%
+                      <td style={{ ...td, textAlign:"center" as const, fontWeight:600 }}>{Number(q.price ?? 0).toFixed(2)}</td>
+                      <td style={{ ...td, textAlign:"center" as const, fontWeight:700, color:Number(q.change_pct ?? 0)>=0?"var(--semantic-normal)":"var(--semantic-critical)" }}>
+                        {Number(q.change_pct ?? 0)>=0?"+":""}{Number(q.change_pct ?? 0).toFixed(2)}%
                       </td>
-                      <td style={{ ...td, textAlign:"center" as const }}>{q.high.toFixed(2)}</td>
-                      <td style={{ ...td, textAlign:"center" as const }}>{q.low.toFixed(2)}</td>
+                      <td style={{ ...td, textAlign:"center" as const }}>{Number(q.high ?? 0).toFixed(2)}</td>
+                      <td style={{ ...td, textAlign:"center" as const }}>{Number(q.low ?? 0).toFixed(2)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -3110,8 +3110,9 @@ export default function NetworkView() {
             <div style={pbCss}>
               {instability.length===0 && <div style={{ color:"var(--text-muted)", fontSize:13 }}>No instability data.</div>}
               {[...instability].sort((a,b)=>b.instability_score-a.instability_score).map((ci,i) => {
-                const pct = Math.min(100, ci.instability_score);
-                const col = scoreColor(ci.instability_score);
+                const score = Number(ci.instability_score ?? 0);
+                const pct = Math.min(100, score);
+                const col = scoreColor(score);
                 return (
                   <div key={ci.country} style={{ padding:"5px 0", borderBottom:"1px solid var(--border-subtle)" }}>
                     <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
@@ -3123,13 +3124,13 @@ export default function NetworkView() {
                       >
                         {ci.country}
                       </button>
-                      <span style={{ fontSize:13, fontWeight:700, color:col }}>{ci.instability_score.toFixed(0)}</span>
+                      <span style={{ fontSize:13, fontWeight:700, color:col }}>{score.toFixed(0)}</span>
                     </div>
                     <div style={{ marginLeft:26, height:3, background:"rgba(0,0,0,0.08)", borderRadius:2 }}>
                       <div style={{ height:"100%", width:`${pct}%`, background:col, borderRadius:2, transition:"width 0.3s" }} />
                     </div>
                     <div style={{ marginLeft:26, marginTop:2, fontSize:11, color:"var(--text-muted)" }}>
-                      Conflict:{ci.conflict.toFixed(0)} · Natural:{ci.natural.toFixed(0)} · Deaths:{ci.fatalities.toFixed(0)}
+                      Conflict:{Number(ci.conflict ?? 0).toFixed(0)} · Natural:{Number(ci.natural ?? 0).toFixed(0)} · Deaths:{Number(ci.fatalities ?? 0).toFixed(0)}
                     </div>
                   </div>
                 );
