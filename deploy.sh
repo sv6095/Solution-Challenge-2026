@@ -52,11 +52,11 @@ fi
 info "[1/5] Pulling latest code from git..."
 git pull origin main
 
-info "[2/5] Removing old images before rebuilding..."
-# Bring containers down and remove images built by compose (local images only)
-docker compose down --rmi local --remove-orphans 2>/dev/null || true
-# Prune any remaining dangling (untagged) images to free disk space
+info "[2/5] Cleaning up old resources (preserving build cache)..."
+# Just clean up dangling/untagged images
 docker image prune -f
+# Prune the build cache but keep the most recent 15GB to ensure fast rebuilds without disk exhaustion
+docker builder prune -f --keep-storage 15GB 2>/dev/null || true
 
 info "[3/5] Building fresh images and starting containers..."
 docker compose up -d --build --remove-orphans

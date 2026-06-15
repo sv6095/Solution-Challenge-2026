@@ -31,7 +31,7 @@ type WSEventHandler = (event: WSEvent) => void;
 // ── Module-level singleton ───────────────────────────────────────────────────
 
 let _ws: WebSocket | null = null;
-let _listeners: Set<WSEventHandler> = new Set();
+const _listeners: Set<WSEventHandler> = new Set();
 let _tenantId: string | null = null;
 let _reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let _reconnectAttempt = 0;

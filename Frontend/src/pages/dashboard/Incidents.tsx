@@ -252,7 +252,7 @@ const Incidents = () => {
 
   const canAct = detail?.status === "AWAITING_APPROVAL" &&
     String(detail?.simulation_outcome || "").toLowerCase() !== "no_impact" &&
-    !Boolean(detail?.simulation_only && Number(detail?.affected_node_count || 0) === 0);
+    !(detail?.simulation_only && Number(detail?.affected_node_count || 0) === 0);
 
   /* ── Derive route coords from incident data ─────────────────────────── */
   const nodes = detail?.affected_nodes || [];

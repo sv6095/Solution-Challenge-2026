@@ -1127,7 +1127,7 @@ function SmartVideoGrid({
     const currentIds = new Set(currentActive.map(i => i.id));
     const availableToAdd = validPool.filter(i => !currentIds.has(i.id));
     
-    let newActive = currentActive.filter(i => region === 'All' || i.region === region);
+    const newActive = currentActive.filter(i => region === 'All' || i.region === region);
     
     while (newActive.length < Math.min(limit, validPool.length) && availableToAdd.length > 0) {
       const next = availableToAdd.shift();

@@ -8,7 +8,7 @@
 //   - Chinese Ream Naval Base: OPERATIONAL April 2025
 //   - US Afghanistan bases: CLOSED 2021
 
-import type { MilitaryBase } from '@/types';
+import type { MilitaryBase } from '../types/types';
 
 export const MILITARY_BASES_EXPANDED: MilitaryBase[] = [
   { id: 'ream_naval_base', name: 'Ream Naval Base', lat: 10.50340, lon: 103.60900, type: 'china', country: 'Cambodia', arm: 'PLA Navy(Access Right)', status: 'controversial', description: 'PLA Navy(Access Right). Host: Cambodia. Status disputed.' },

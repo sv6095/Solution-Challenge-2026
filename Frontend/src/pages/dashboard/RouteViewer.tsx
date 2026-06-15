@@ -609,7 +609,6 @@ export default function RouteViewer() {
                       "Real-time API"}
                   </span>
                 </div>
-                <p style={{ fontSize: 9, fontFamily: "monospace", color: "#94a3b8", marginTop: 6 }}>Free, no API key · Open data</p>
               </div>
             )}
           </div>
