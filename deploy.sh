@@ -61,6 +61,10 @@ docker builder prune -f --keep-storage 15GB 2>/dev/null || true
 info "[3/5] Building fresh images and starting containers..."
 docker compose up -d --build --remove-orphans
 
+# Force nginx to reload its config in case the container was not recreated
+# (nginx:alpine image unchanged = container kept alive, config not re-read)
+docker compose exec nginx nginx -s reload 2>/dev/null || true
+
 info "[4/5] Container status:"
 docker compose ps
 
@@ -69,12 +73,16 @@ docker compose logs --tail=80 backend
 
 echo ""
 info "Health check via nginx (port 80):"
-sleep 10   # Give the backend time to fully initialise (torch load + scheduler start)
-if curl -sf http://localhost/api/ping > /dev/null; then
-  echo -e "${GREEN}✅ /api/ping returned OK — deployment successful!${NC}"
-else
-  error "/api/ping check failed. Check the logs above."
-  echo "  docker compose logs backend"
-  echo "  docker compose logs nginx"
-  exit 1
-fi
+echo "  Waiting up to 30s for backend to be reachable through nginx..."
+for i in $(seq 1 6); do
+  if curl -sf http://localhost/api/ping > /dev/null; then
+    echo -e "${GREEN}✅ /api/ping returned OK — deployment successful!${NC}"
+    exit 0
+  fi
+  echo "  Attempt $i/6 failed, retrying in 5s..."
+  sleep 5
+done
+error "/api/ping check failed after 30s. Check the logs above."
+echo "  docker compose logs backend"
+echo "  docker compose logs nginx"
+exit 1
