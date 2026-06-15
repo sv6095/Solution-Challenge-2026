@@ -11,7 +11,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ThumbsUp, ThumbsDown, HelpCircle, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
 
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
@@ -162,15 +161,8 @@ export function GovernanceFeedbackWidget({ incidentId, status }: Props) {
         <span className="text-[10px] font-mono text-gray-500">{expanded ? "▲" : "▼"}</span>
       </button>
 
-      <AnimatePresence>
-        {expanded && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.18 }}
-            className="overflow-hidden border-t border-border/40"
-          >
+      {expanded && (
+        <div className="overflow-hidden border-t border-border/40">
             <div className="p-4 space-y-3 bg-surface-low">
               {(hasFeedback || submitted) ? (
                 <div className="text-center py-2">
@@ -267,9 +259,8 @@ export function GovernanceFeedbackWidget({ incidentId, status }: Props) {
                 </>
               )}
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+        </div>
+      )}
     </div>
   );
 }

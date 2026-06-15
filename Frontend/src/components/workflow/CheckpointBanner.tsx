@@ -9,7 +9,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ShieldAlert, ShieldCheck, ShieldOff, Loader2, AlertTriangle, Clock } from "lucide-react";
-import { motion, AnimatePresence } from "motion/react";
 
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
@@ -134,11 +133,7 @@ export function CheckpointBanner({ incidentId }: Props) {
   const hoursLeft = Math.max(0, (expiresAt.getTime() - Date.now()) / 3_600_000);
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: -6 }}
-      animate={{ opacity: 1, y: 0 }}
-      className="border border-orange-200 bg-orange-50 rounded shadow-sm"
-    >
+    <div className="border border-orange-200 bg-orange-50 rounded shadow-sm">
       {/* Header */}
       <div className="flex items-start gap-3 px-4 py-3">
         <ShieldAlert size={16} className="text-orange-500 mt-0.5 shrink-0" />
@@ -194,14 +189,8 @@ export function CheckpointBanner({ incidentId }: Props) {
       </div>
 
       {/* Override reason panel */}
-      <AnimatePresence>
-        {showOverride && (
-          <motion.div
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-t border-orange-200"
-          >
+      {showOverride && (
+        <div className="overflow-hidden border-t border-orange-200">
             <div className="px-4 pb-4 pt-3 space-y-2 bg-white">
               <div className="flex items-center gap-2 text-[10px] font-mono text-orange-600">
                 <AlertTriangle size={10} />
@@ -229,9 +218,8 @@ export function CheckpointBanner({ incidentId }: Props) {
                 <p className="text-xs font-mono text-red-600">Override failed. Try again.</p>
               )}
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </motion.div>
+        </div>
+      )}
+    </div>
   );
 }

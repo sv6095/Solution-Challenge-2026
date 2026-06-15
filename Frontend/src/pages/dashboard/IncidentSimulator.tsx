@@ -15,8 +15,6 @@ import {
   Truck,
   Zap,
 } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
-
 import { api } from "@/lib/api";
 import { filterFreshIncidents } from "@/lib/incident-freshness";
 import { ReasoningPanel } from "@/components/workflow/ReasoningPanel";
@@ -484,15 +482,8 @@ const IncidentSimulator = () => {
                   </div>
                   {rfqExpanded ? <ChevronUp size={14} className="text-slate-400" /> : <ChevronDown size={14} className="text-slate-400" />}
                 </button>
-                <AnimatePresence>
-                  {rfqExpanded && (
-                    <motion.div
-                      initial={{ height: 0, opacity: 0 }}
-                      animate={{ height: "auto", opacity: 1 }}
-                      exit={{ height: 0, opacity: 0 }}
-                      transition={{ duration: 0.2 }}
-                      className="overflow-hidden"
-                    >
+                {rfqExpanded && (
+                    <div className="overflow-hidden">
                       <div className="px-5 pb-5 space-y-3 text-sm border-t border-slate-100 pt-4 bg-slate-50">
                         <div className="flex items-baseline">
                           <span className="text-slate-400 font-mono font-bold w-16">To:</span>
@@ -506,9 +497,8 @@ const IncidentSimulator = () => {
                           {String(detail.rfq_draft.body || "")}
                         </pre>
                       </div>
-                    </motion.div>
+                    </div>
                   )}
-                </AnimatePresence>
               </div>
             )}
 
