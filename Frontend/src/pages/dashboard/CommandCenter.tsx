@@ -244,18 +244,21 @@ const CommandCenter = () => {
     ? b.active_incidents
     : [...(b.critical_incidents || []), ...(b.watch_incidents || [])]) as Record<string, unknown>[];
   const incidents = filterFreshIncidents(activePool);
-  const criticalCount = incidents.filter((inc) => ["CRITICAL", "HIGH"].includes(String(inc.severity || ""))).length;
-  const watchCount = incidents.filter((inc) => ["MODERATE", "LOW"].includes(String(inc.severity || ""))).length;
+  const listedCriticalCount = incidents.filter((inc) => ["CRITICAL", "HIGH"].includes(String(inc.severity || "").toUpperCase())).length;
+  const listedWatchCount = incidents.filter((inc) => ["MODERATE", "MEDIUM", "WARNING", "LOW"].includes(String(inc.severity || "").toUpperCase())).length;
+  const criticalCount = Number(b.critical_count ?? listedCriticalCount) || listedCriticalCount;
+  const watchCount = Number(b.watch_count ?? listedWatchCount) || listedWatchCount;
+  const activeIncidentCount = Number(b.critical_count ?? 0) + Number(b.watch_count ?? 0) || incidents.length;
 
   const selectedIncident = selectedId
     ? incidents.find((i: any) => String(i.id) === selectedId)
     : incidents[0];
 
   /* derived stats */
-  const safeCount = Math.max(0, totalNodes - criticalCount - watchCount);
+  const safeCount = Math.max(0, totalNodes - activeIncidentCount);
   const safePct = totalNodes ? Math.round((safeCount / totalNodes) * 100) : 100;
   const sparkCritical = useMemo(() => Array.from({ length: 7 }, () => Math.max(1, criticalCount + Math.floor(Math.random() * 8 - 4))), [criticalCount]);
-  const sparkActive = useMemo(() => Array.from({ length: 7 }, () => Math.max(1, criticalCount + watchCount + Math.floor(Math.random() * 6 - 3))), [criticalCount, watchCount]);
+  const sparkActive = useMemo(() => Array.from({ length: 7 }, () => Math.max(1, activeIncidentCount + Math.floor(Math.random() * 6 - 3))), [activeIncidentCount]);
   const sparkHealth = useMemo(() => Array.from({ length: 7 }, () => Math.max(30, safePct + Math.floor(Math.random() * 10 - 5))), [safePct]);
   const sparkNodes = useMemo(() => Array.from({ length: 7 }, () => Math.max(800, totalNodes + Math.floor(Math.random() * 50 - 25))), [totalNodes]);
 
@@ -291,7 +294,7 @@ const CommandCenter = () => {
         <div className="bg-card border border-border rounded-lg p-4 flex items-center gap-4 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex-1 min-w-0">
             <p className="text-[10px] font-mono font-bold uppercase tracking-widest text-muted-foreground mb-1">Active Incidents</p>
-            <p className="text-3xl font-headline font-black text-orange-500 tabular-nums leading-none">{isLoading ? "—" : criticalCount + watchCount}</p>
+            <p className="text-3xl font-headline font-black text-orange-500 tabular-nums leading-none">{isLoading ? "—" : activeIncidentCount}</p>
             <p className="text-[10px] text-orange-500 font-medium mt-1 flex items-center gap-1">
               <TrendingUp size={10} /> +{Math.max(1, Math.floor(watchCount * 0.3))} vs yesterday
             </p>

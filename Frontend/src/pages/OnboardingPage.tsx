@@ -148,35 +148,63 @@ export default function OnboardingPage(props: Props) {
     setTrackerFileName(suppliersData.file.name);
     setNodesFileName(nodesData.file.name);
 
-    // Helper: case-insensitive column lookup
+    const normalizeKey = (value: string): string =>
+      value.replace(/^\uFEFF/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    // Helper: tolerant column lookup across snake_case, spaces, casing, and BOMs.
     const col = (row: Record<string, string>, ...keys: string[]): string => {
+      const wanted = new Set(keys.map(normalizeKey));
       for (const k of keys) {
-        const found = Object.keys(row).find((rk) => rk.toLowerCase().trim() === k.toLowerCase());
+        const found = Object.keys(row).find((rk) => normalizeKey(rk.trim()) === normalizeKey(k));
         if (found && row[found] !== undefined && row[found] !== '') return row[found].trim();
       }
+      const found = Object.keys(row).find((rk) => wanted.has(normalizeKey(rk.trim())));
+      if (found && row[found] !== undefined && row[found] !== '') return row[found].trim();
       return '';
     };
 
+    const parseNumber = (value: string): number => {
+      const cleaned = String(value || '').trim().replace(/,/g, '');
+      const parsed = cleaned ? Number.parseFloat(cleaned) : 0;
+      return Number.isFinite(parsed) ? parsed : 0;
+    };
+
+    const isValidCoordinate = (lat: number, lng: number): boolean =>
+      Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180 && !(lat === 0 && lng === 0);
+
+    const splitRefs = (value: string): string[] =>
+      value
+        .split(/[;,|]/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+
     // Build a lookup: node_name -> node row
     const nodeByName: Record<string, Record<string, string>> = {};
-    for (const n of nodesData.rows) {
-      const name = col(n, 'node_name', 'name', 'node');
-      if (name) nodeByName[name.toLowerCase()] = n;
-    }
+    nodesData.rows.forEach((n, idx) => {
+      const aliases = [
+        `Node_${idx + 1}`,
+        col(n, 'node_id', 'id'),
+        col(n, 'node_name', 'name', 'node'),
+        col(n, 'facility_name', 'site_name', 'location_name'),
+      ].filter(Boolean);
+      for (const alias of aliases) {
+        nodeByName[alias.toLowerCase()] = n;
+      }
+    });
 
     // Map supplier rows → NodeItem[], joining with node data via origin_nodes
     const csvNodes: NodeItem[] = suppliersData.rows.map((s, idx) => {
-      const originNodeKey = col(s, 'origin_nodes', 'origin_node', 'node_name', 'node').toLowerCase();
-      const nodeRow = nodeByName[originNodeKey] ?? {};
+      const originNodeRefs = splitRefs(col(s, 'origin_nodes', 'origin_node', 'node_name', 'node', 'node_id'));
+      const nodeRow = originNodeRefs.map((ref) => nodeByName[ref.toLowerCase()]).find(Boolean) ?? {};
 
-      const nodeName = col(nodeRow, 'node_name', 'name') || col(s, 'origin_nodes', 'origin_node', 'node_name') || `Node_${idx + 1}`;
+      const nodeName = col(nodeRow, 'node_name', 'name', 'node', 'facility_name', 'site_name') || originNodeRefs[0] || col(s, 'origin_nodes', 'origin_node', 'node_name') || `Node_${idx + 1}`;
       const address  = col(nodeRow, 'address', 'location', 'city') || col(s, 'city', 'country', 'location', 'address') || '';
       const nodeType = col(nodeRow, 'node_type', 'type', 'facility_type') || 'factory';
 
       const latRaw = col(nodeRow, 'lat', 'latitude') || col(s, 'lat', 'latitude');
       const lngRaw = col(nodeRow, 'lng', 'lon', 'longitude') || col(s, 'lng', 'lon', 'longitude');
-      const lat = latRaw ? parseFloat(latRaw) : 0;
-      const lng = lngRaw ? parseFloat(lngRaw) : 0;
+      const lat = parseNumber(latRaw);
+      const lng = parseNumber(lngRaw);
 
       const tier = col(s, 'tier', 'supplier_tier') || 'Tier 1';
       const slaDaysRaw = col(s, 'sla_days', 'sla', 'lead_time_days');
@@ -187,8 +215,8 @@ export default function OnboardingPage(props: Props) {
       return {
         id: `csv-n${idx + 1}`,
         name: nodeName,
-        lat: isNaN(lat) ? 0 : lat,
-        lng: isNaN(lng) ? 0 : lng,
+        lat: isValidCoordinate(lat, lng) ? lat : 0,
+        lng: isValidCoordinate(lat, lng) ? lng : 0,
         tier,
         address,
         nodeType,
@@ -204,21 +232,21 @@ export default function OnboardingPage(props: Props) {
 
     // Also incorporate any nodes that were NOT referenced by any supplier
     const referencedNodeKeys = new Set(
-      suppliersData.rows.map((s) =>
-        col(s, 'origin_nodes', 'origin_node', 'node_name', 'node').toLowerCase()
+      suppliersData.rows.flatMap((s) =>
+        splitRefs(col(s, 'origin_nodes', 'origin_node', 'node_name', 'node', 'node_id')).map((ref) => ref.toLowerCase())
       )
     );
     for (const [key, nodeRow] of Object.entries(nodeByName)) {
       if (!referencedNodeKeys.has(key)) {
         const latRaw = col(nodeRow, 'lat', 'latitude');
         const lngRaw = col(nodeRow, 'lng', 'lon', 'longitude');
-        const lat = latRaw ? parseFloat(latRaw) : 0;
-        const lng = lngRaw ? parseFloat(lngRaw) : 0;
+        const lat = parseNumber(latRaw);
+        const lng = parseNumber(lngRaw);
         csvNodes.push({
           id: `csv-standalone-${key}`,
           name: col(nodeRow, 'node_name', 'name') || key,
-          lat: isNaN(lat) ? 0 : lat,
-          lng: isNaN(lng) ? 0 : lng,
+          lat: isValidCoordinate(lat, lng) ? lat : 0,
+          lng: isValidCoordinate(lat, lng) ? lng : 0,
           tier: col(nodeRow, 'tier') || 'Tier 1',
           address: col(nodeRow, 'address', 'location', 'city') || '',
           nodeType: col(nodeRow, 'node_type', 'type') || 'factory',
@@ -293,8 +321,8 @@ export default function OnboardingPage(props: Props) {
           contract_sla_days: String(n.slaDays || 0),
           backup_supplier: n.backupSupplier || false,
           incoterm: n.incoterm || "FOB",
-          lat: 0.0,
-          lng: 0.0,
+          lat: n.lat || 0.0,
+          lng: n.lng || 0.0,
         })),
         backup_suppliers: stagedNodes.filter((n) => n.backupSupplier).map((n) => ({ 
           name: n.supplierName || `Supplier for ${n.name}`, 
@@ -314,6 +342,8 @@ export default function OnboardingPage(props: Props) {
         updated_at: new Date().toISOString(),
       });
       await queryClient.refetchQueries({ queryKey: ["onboarding-status", userId] });
+      await queryClient.invalidateQueries({ queryKey: ["risks", "suppliers"] });
+      await queryClient.invalidateQueries({ queryKey: ["user-context", userId] });
       toast.success("Onboarding complete.");
       setCurrentPage('SUCCESS_SCREEN');
     } catch {
