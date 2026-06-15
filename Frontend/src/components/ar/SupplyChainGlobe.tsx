@@ -93,7 +93,9 @@ export type SupplyChainGlobeProps = {
   disruptions: ArAssetDisruption[];
   className?: string;
   selectedDisruptionId?: string | null;
+  selectedNodeId?: string | null;
   onDisruptionClick?: (disruption: ArAssetDisruption) => void;
+  onNodeClick?: (node: ArAssetNode) => void;
   autoRotate?: boolean;
   showRouteLabels?: boolean;
   showLegend?: boolean;
@@ -106,7 +108,9 @@ export function SupplyChainGlobe({
   disruptions,
   className = "",
   selectedDisruptionId = null,
+  selectedNodeId = null,
   onDisruptionClick,
+  onNodeClick,
   autoRotate = true,
   showRouteLabels = true,
   showLegend = true,
@@ -193,6 +197,14 @@ export function SupplyChainGlobe({
     const globe = globeRef.current;
     if (!globe) return;
 
+    const selectedNode = selectedNodeId
+      ? nodes.find((n) => String(n.id) === String(selectedNodeId))
+      : null;
+    if (selectedNode) {
+      globe.pointOfView({ lat: selectedNode.lat, lng: selectedNode.lng, altitude: 1.5 }, 900);
+      return;
+    }
+
     const selected = selectedDisruptionId
       ? disruptions.find((d) => String(d.id) === String(selectedDisruptionId))
       : null;
@@ -211,7 +223,7 @@ export function SupplyChainGlobe({
     const lat = focusPoints.reduce((sum, p) => sum + Number(p.lat), 0) / focusPoints.length;
     const lng = focusPoints.reduce((sum, p) => sum + Number(p.lng), 0) / focusPoints.length;
     globe.pointOfView({ lat, lng, altitude: disruptions.length ? 2.0 : 2.15 }, 900);
-  }, [disruptions, focusKey, nodes, selectedDisruptionId]);
+  }, [disruptions, focusKey, nodes, selectedDisruptionId, selectedNodeId]);
 
   return (
     <div ref={shellRef} className={`relative overflow-hidden bg-slate-950 ${className}`}>
@@ -229,6 +241,9 @@ export function SupplyChainGlobe({
         pointRadius={(node: ArAssetNode) => Math.max(0.18, Math.min(0.45, Number(node.exposureScore ?? 45) / 180))}
         pointColor={nodeColor}
         pointLabel={(node: ArAssetNode) => `${node.name}<br/>${node.country || "Unknown"}<br/>${node.tier || node.type}`}
+        onPointClick={(node: object) => {
+          if (onNodeClick) onNodeClick(node as ArAssetNode);
+        }}
         arcsData={activeRoutes}
         arcStartLat="startLat"
         arcStartLng="startLng"

@@ -512,6 +512,18 @@ def get_context(user_id: str) -> dict | None:
     return {"user_id": row[0], "payload_json": row[1], "updated_at": row[2]}
 
 
+def list_contexts(limit: int = 500) -> list[dict]:
+    with _conn() as con:
+        with closing(
+            con.execute(
+                "SELECT user_id, payload_json, updated_at FROM contexts ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            )
+        ) as cur:
+            rows = cur.fetchall()
+    return [{"user_id": row[0], "payload_json": row[1], "updated_at": row[2]} for row in rows]
+
+
 def sync_graph_to_sql(user_id: str, payload_json: str) -> None:
     """Normalize the giant JSON blob into scalable SQL tables for efficient intersection queries."""
     try:

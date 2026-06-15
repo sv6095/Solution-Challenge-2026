@@ -43,7 +43,13 @@ from agents.extended_signal_agent import (
     fetch_social_sentiment,
     fetch_wto_trade_signals,
 )
-from services.firestore_store import add_audit, purge_archived_signals, purge_stale_incidents, replace_active_signals
+from services.firestore_store import (
+    add_audit,
+    list_contexts,
+    purge_archived_signals,
+    purge_stale_incidents,
+    replace_active_signals,
+)
 from services.local_store import DB_PATH
 from services.secret_manager import get_secret
 
@@ -310,18 +316,10 @@ async def _poll_sources() -> None:
                 "timestamp": event_ts.isoformat() if event_ts else str(sig.get("created_at") or ""),
             })
 
-        # Query all contexts from SQLite for multi-tenant incident generation
-        import sqlite3
-        contexts_list = []
+        # Query contexts via the active storage abstraction (Firestore or local SQLite).
+        contexts_list: list[dict[str, Any]] = []
         try:
-            with sqlite3.connect(DB_PATH) as con:
-                con.row_factory = sqlite3.Row
-                rows = con.execute("SELECT user_id, payload_json FROM contexts").fetchall()
-                for r in rows:
-                    contexts_list.append({
-                        "user_id": r["user_id"],
-                        "payload_json": r["payload_json"]
-                    })
+            contexts_list = list_contexts(limit=1000)
         except Exception as exc:
             add_audit("context_fetch_error", str(exc))
 
@@ -445,7 +443,14 @@ def start_signal_scheduler() -> None:
         return
     _scheduler = BackgroundScheduler(timezone="UTC")
     interval_minutes = int(os.getenv("SIGNAL_POLL_INTERVAL_MINUTES", "10"))
-    _scheduler.add_job(_job_wrapper, "interval", minutes=interval_minutes, id="signal_poll", replace_existing=True)
+    _scheduler.add_job(
+        _job_wrapper,
+        "interval",
+        minutes=interval_minutes,
+        id="signal_poll",
+        replace_existing=True,
+        next_run_time=datetime.now(timezone.utc),
+    )
     _scheduler.start()
     add_audit("signal_scheduler_started", f"{interval_minutes}m")
 

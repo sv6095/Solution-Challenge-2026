@@ -62,6 +62,7 @@ from services.firestore_store import (
     insert_signal,
     list_audit,
     list_incidents,
+    list_contexts,
     list_simulation_incidents,
     list_rfq_events,
     list_rfq_messages,
@@ -124,7 +125,7 @@ from services.worldmonitor_fetcher import (
     get_chokepoint_status, get_shipping_stress, get_country_instability,
     get_strategic_risk, get_market_implications, get_active_fires,
     get_aviation_intel, get_air_quality, get_critical_minerals,
-    get_shipping_indices, get_shipping_rates,
+    get_shipping_indices, get_shipping_rates, get_worldmonitor_bundle_snapshot,
 )
 
 init_store()
@@ -455,6 +456,39 @@ def _context_payload_for_user(user_id: str) -> dict[str, Any]:
     except Exception:
         payload = {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _context_payload_for_ar(user_id: str, tenant_id: str) -> dict[str, Any]:
+    """
+    Resolve context for AR surfaces across legacy keying patterns.
+    Priority:
+    1) user_id
+    2) tenant_id (when different)
+    3) scan contexts for payload.customer_id == tenant_id
+    """
+    primary = _context_payload_for_user(user_id)
+    if primary:
+        return primary
+
+    if tenant_id and tenant_id != user_id:
+        by_tenant = _context_payload_for_user(tenant_id)
+        if by_tenant:
+            return by_tenant
+
+    try:
+        for row in list_contexts(limit=1000):
+            try:
+                payload = json.loads(row.get("payload_json") or "{}")
+            except Exception:
+                payload = {}
+            if not isinstance(payload, dict):
+                continue
+            customer_id = str(payload.get("customer_id") or payload.get("company_name") or "").strip()
+            if customer_id and customer_id == tenant_id:
+                return payload
+    except Exception:
+        pass
+    return {}
 
 
 def _context_suppliers(user_id: str) -> list[dict[str, Any]]:
@@ -2647,7 +2681,7 @@ async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[st
     """
     user_id = str(user.get("sub") or "").strip()
     tenant_id = _resolved_request_tenant(user)
-    ctx = _context_payload_for_user(user_id)
+    ctx = _context_payload_for_ar(user_id, tenant_id)
     network = ctx.get("supply_chain_network") if isinstance(ctx.get("supply_chain_network"), dict) else {}
 
     raw_nodes = network.get("nodes") if isinstance(network, dict) else []
@@ -4665,23 +4699,54 @@ async def api_global_refresh(user=Depends(verify_firebase_or_local_token)):
     return result
 
 
+def _build_global_summary_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "strategic_risk": snapshot["strategic_risk"],
+        "shipping_stress": snapshot["shipping_stress"],
+        "chokepoints": snapshot["chokepoints"][:5],
+        "top_instability": snapshot["country_instability"][:10],
+        "market_implications": snapshot["market_implications"],
+        "active_hazards": len(snapshot["hazards"]),
+        "active_fires": len(snapshot["fires"]),
+        "conflict_events": len(snapshot["conflict"]),
+        "minerals": snapshot["minerals"],
+    }
+
+
+def _build_global_dashboard_bundle_from_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "summary": _build_global_summary_from_snapshot(snapshot),
+        "hazards": {"data": snapshot["hazards"], "source": "NASA EONET"},
+        "earthquakes": {"data": snapshot["earthquakes"], "source": "USGS"},
+        "conflict": {"data": snapshot["conflict"], "source": "ACLED"},
+        "gdelt": {"data": snapshot["gdelt"], "source": "GDELT"},
+        "disasters": {"data": snapshot["disasters"], "source": "GDACS"},
+        "news": {"data": snapshot["news"], "source": "NewsAPI"},
+        "market_quotes": {"data": snapshot["market_quotes"], "source": "Finnhub"},
+        "energy": {"data": snapshot["energy"], "source": "EIA"},
+        "macro": {"data": snapshot["macro"], "source": "FRED"},
+        "chokepoints": {"data": snapshot["chokepoints"], "source": "Praecantator"},
+        "shipping_stress": snapshot["shipping_stress"],
+        "shipping_indices": {"data": snapshot["shipping_indices"]},
+        "shipping_rates": snapshot["shipping_rates"],
+        "country_instability": {"data": snapshot["country_instability"]},
+        "strategic_risk": snapshot["strategic_risk"],
+        "market_implications": snapshot["market_implications"],
+        "fires": {"data": snapshot["fires"], "source": "NASA FIRMS"},
+        "aviation": {"data": snapshot["aviation"], "source": "AviationStack"},
+        "air_quality": {"data": snapshot["air_quality"], "source": "OpenAQ"},
+        "minerals": {"data": snapshot["minerals"]},
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 @app.get("/api/global/summary")
 async def api_global_summary(response: Response):
     """Aggregate summary panel combining all worldmonitor data feeds."""
     return await _cached_global_response(
         response,
         "summary",
-        lambda: {
-            "strategic_risk": get_strategic_risk(),
-            "shipping_stress": get_shipping_stress(),
-            "chokepoints": get_chokepoint_status()[:5],
-            "top_instability": get_country_instability()[:10],
-            "market_implications": get_market_implications(),
-            "active_hazards": len(get_natural_hazards()),
-            "active_fires": len(get_active_fires()),
-            "conflict_events": len(get_conflict_events()),
-            "minerals": get_critical_minerals(),
-        },
+        lambda: _build_global_summary_from_snapshot(get_worldmonitor_bundle_snapshot()),
     )
 
 
@@ -4694,40 +4759,7 @@ async def api_global_dashboard_bundle(response: Response):
     return await _cached_global_response(
         response,
         "dashboard-bundle",
-        lambda: {
-            "summary": {
-                "strategic_risk": get_strategic_risk(),
-                "shipping_stress": get_shipping_stress(),
-                "chokepoints": get_chokepoint_status()[:5],
-                "top_instability": get_country_instability()[:10],
-                "market_implications": get_market_implications(),
-                "active_hazards": len(get_natural_hazards()),
-                "active_fires": len(get_active_fires()),
-                "conflict_events": len(get_conflict_events()),
-                "minerals": get_critical_minerals(),
-            },
-            "hazards": {"data": get_natural_hazards(), "source": "NASA EONET"},
-            "earthquakes": {"data": get_earthquakes(), "source": "USGS"},
-            "conflict": {"data": get_conflict_events(), "source": "ACLED"},
-            "gdelt": {"data": get_gdalt_events(), "source": "GDELT"},
-            "disasters": {"data": get_gdacs_alerts(), "source": "GDACS"},
-            "news": {"data": get_supply_chain_news(), "source": "NewsAPI"},
-            "market_quotes": {"data": get_market_quotes(), "source": "Finnhub"},
-            "energy": {"data": get_energy_prices(), "source": "EIA"},
-            "macro": {"data": get_macro_indicators(), "source": "FRED"},
-            "chokepoints": {"data": get_chokepoint_status(), "source": "Praecantator"},
-            "shipping_stress": get_shipping_stress(),
-            "shipping_indices": {"data": get_shipping_indices()},
-            "shipping_rates": get_shipping_rates(),
-            "country_instability": {"data": get_country_instability()},
-            "strategic_risk": get_strategic_risk(),
-            "market_implications": get_market_implications(),
-            "fires": {"data": get_active_fires(), "source": "NASA FIRMS"},
-            "aviation": {"data": get_aviation_intel(), "source": "AviationStack"},
-            "air_quality": {"data": get_air_quality(), "source": "OpenAQ"},
-            "minerals": {"data": get_critical_minerals()},
-            "generated_at": datetime.now(timezone.utc).isoformat(),
-        },
+        lambda: _build_global_dashboard_bundle_from_snapshot(get_worldmonitor_bundle_snapshot()),
         ttl_seconds=60,
     )
 

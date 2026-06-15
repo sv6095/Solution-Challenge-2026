@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Box, RadioTower, RefreshCw } from "lucide-react";
 import { api, getUserId } from "@/lib/api";
@@ -6,13 +6,14 @@ import { useWebSocket } from "@/hooks/use-websocket";
 import { Button } from "@/components/ui/button";
 import { SupplyChainGlobe } from "@/components/ar/SupplyChainGlobe";
 import { IncidentFlyoverMap } from "@/components/ar/IncidentFlyoverMap";
-import type { ArAssetDisruption } from "@/lib/api";
+import type { ArAssetDisruption, ArAssetNode } from "@/lib/api";
 
 export default function ArView() {
   const queryClient = useQueryClient();
   const tenantId = getUserId();
   const { lastEvent } = useWebSocket(tenantId);
   const [selectedDisruption, setSelectedDisruption] = useState<ArAssetDisruption | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["ar", "assets"],
@@ -41,6 +42,9 @@ export default function ArView() {
   const hasGlobeData = nodes.length > 0 || disruptions.length > 0;
   const selectedDisruptionId = selectedDisruption?.id ?? null;
   const mapsApiKey = mapsConfig?.google_maps_api_key || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
+  const onNodeClick = useCallback((node: ArAssetNode) => {
+    setSelectedNodeId(String(node.id));
+  }, []);
 
   return (
     <div className="space-y-4">
@@ -93,12 +97,15 @@ export default function ArView() {
         ) : (
           <SupplyChainGlobe
             nodes={nodes}
-            routes={routes}
+            routes={[]}
             disruptions={disruptions}
             className="h-[min(72vh,720px)] min-h-[520px] rounded-lg border border-slate-800"
             focusKey={data?.updated_at}
             selectedDisruptionId={selectedDisruptionId}
+            selectedNodeId={selectedNodeId}
             onDisruptionClick={setSelectedDisruption}
+            onNodeClick={onNodeClick}
+            showRouteLabels={false}
           />
         )
       )}

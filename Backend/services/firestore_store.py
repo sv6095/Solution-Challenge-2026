@@ -600,6 +600,25 @@ def get_context(user_id: str) -> dict | None:
     return {"user_id": user_id, "payload_json": json.dumps(data), "updated_at": data.get("updated_at", "")}
 
 
+def list_contexts(limit: int = 500) -> list[dict[str, Any]]:
+    rows = _query_stream(
+        _client().collection("contexts").order_by("updated_at", direction=g_firestore.Query.DESCENDING).limit(limit)
+    )
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        user_id = str(row.get("user_id") or row.get("_doc_id") or "").strip()
+        if not user_id:
+            continue
+        out.append(
+            {
+                "user_id": user_id,
+                "payload_json": json.dumps(row),
+                "updated_at": row.get("updated_at", ""),
+            }
+        )
+    return out
+
+
 def sync_graph_to_firestore(user_id: str, payload: dict[str, Any]) -> None:
     db = _client()
     tenant_id = user_id

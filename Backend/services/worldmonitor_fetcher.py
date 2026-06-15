@@ -192,6 +192,55 @@ def db_read_all_by_table(table: str) -> list[dict]:
         return []
 
 
+def db_read_many(keys: list[str]) -> dict[str, dict[str, Any] | None]:
+    """
+    Read multiple cached payloads with a single Firestore round-trip when possible.
+    Falls back to per-key reads for local SQLite or unsupported clients.
+    """
+    now = time.monotonic()
+    result: dict[str, dict[str, Any] | None] = {}
+    stale_payloads: dict[str, dict[str, Any]] = {}
+    misses: list[str] = []
+
+    with _READ_CACHE_LOCK:
+        for key in keys:
+            cached = _READ_CACHE.get(key)
+            if cached:
+                stale_payloads[key] = cached[1]
+                if cached[0] > now:
+                    result[key] = cached[1]
+                    continue
+            misses.append(key)
+
+    if not misses:
+        return result
+
+    client = _client()
+    try:
+        if hasattr(client, "get_all"):
+            refs = [client.collection("worldmonitor_cache").document(_safe_doc_id(key)) for key in misses]
+            docs = list(client.get_all(refs))
+            for key, doc in zip(misses, docs):
+                if not doc.exists:
+                    result[key] = None
+                    continue
+                data = doc.to_dict() or {}
+                payload = {"data": data.get("payload"), "fetched_at": data.get("fetched_at")}
+                result[key] = payload
+                with _READ_CACHE_LOCK:
+                    _READ_CACHE[key] = (now + _READ_CACHE_TTL_SECONDS, payload)
+        else:
+            for key in misses:
+                result[key] = db_read(key)
+    except Exception:
+        for key in misses:
+            result[key] = stale_payloads.get(key)
+
+    for key in keys:
+        result.setdefault(key, stale_payloads.get(key))
+    return result
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Individual fetchers — each matches a worldmonitor data panel
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1102,3 +1151,64 @@ def get_shipping_rates() -> dict:
     if r and r.get("data"):
         return r["data"]
     return {"indices": SHIPPING_INDICES, "fetched_at": "", "upstream_unavailable": True}
+
+
+def get_worldmonitor_bundle_snapshot() -> dict[str, Any]:
+    """
+    Optimized multi-key read for dashboard/summary endpoints.
+    Reduces repeated Firestore document reads during one API request.
+    """
+    keys = [
+        "eonet_events",
+        "usgs_earthquakes",
+        "acled_events",
+        "gdelt_events",
+        "gdacs_alerts",
+        "newsapi_supply_chain",
+        "finnhub_quotes",
+        "eia_energy",
+        "fred_macro",
+        "scored_chokepoints",
+        "shipping_stress",
+        "country_instability",
+        "strategic_risk",
+        "market_implications",
+        "firms_fires",
+        "aviationstack_flights",
+        "openaq_cities",
+        "shipping_rates_v2",
+    ]
+    rows = db_read_many(keys)
+
+    def _data(key: str, default: Any) -> Any:
+        row = rows.get(key)
+        if row and row.get("data") is not None:
+            return row["data"]
+        return default
+
+    chokepoints = _data(
+        "scored_chokepoints",
+        [{**cp, "risk_score": cp["traffic_pct"], "trend": "stable"} for cp in CHOKEPOINTS],
+    )
+    return {
+        "hazards": _data("eonet_events", []),
+        "earthquakes": _data("usgs_earthquakes", []),
+        "conflict": _data("acled_events", []),
+        "gdelt": _data("gdelt_events", []),
+        "disasters": _data("gdacs_alerts", []),
+        "news": _data("newsapi_supply_chain", []),
+        "market_quotes": _data("finnhub_quotes", []),
+        "energy": _data("eia_energy", {}),
+        "macro": _data("fred_macro", {}),
+        "chokepoints": chokepoints,
+        "shipping_stress": _data("shipping_stress", {"stress_score": 50, "stress_level": "elevated", "carriers": []}),
+        "country_instability": _data("country_instability", []),
+        "strategic_risk": _data("strategic_risk", {"score": 50, "level": "ELEVATED", "trend": "Stable"}),
+        "market_implications": _data("market_implications", {"summary": [], "generated_at": ""}),
+        "fires": _data("firms_fires", []),
+        "aviation": _data("aviationstack_flights", []),
+        "air_quality": _data("openaq_cities", []),
+        "minerals": CRITICAL_MINERALS,
+        "shipping_indices": SHIPPING_INDICES,
+        "shipping_rates": _data("shipping_rates_v2", {"indices": SHIPPING_INDICES, "fetched_at": "", "upstream_unavailable": True}),
+    }
