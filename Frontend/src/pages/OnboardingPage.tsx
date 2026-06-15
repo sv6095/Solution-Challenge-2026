@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import SourceSelection from './onboarding/SourceSelection';
-import CsvUploader from './onboarding/CsvUploader';
+import CsvUploader, { ParsedCsvData } from './onboarding/CsvUploader';
 import ErpConnection from './onboarding/ErpConnection';
 import ManualNodeEntry from './onboarding/ManualNodeEntry';
 import FinalizingScreen from './onboarding/FinalizingScreen';
@@ -144,10 +144,90 @@ export default function OnboardingPage(props: Props) {
     }
   };
 
-  const handleCsvUploaded = (suppliersName: string, nodesName: string) => {
-    setTrackerFileName(suppliersName);
-    setNodesFileName(nodesName);
-    
+  const handleCsvUploaded = (suppliersData: ParsedCsvData, nodesData: ParsedCsvData) => {
+    setTrackerFileName(suppliersData.file.name);
+    setNodesFileName(nodesData.file.name);
+
+    // Helper: case-insensitive column lookup
+    const col = (row: Record<string, string>, ...keys: string[]): string => {
+      for (const k of keys) {
+        const found = Object.keys(row).find((rk) => rk.toLowerCase().trim() === k.toLowerCase());
+        if (found && row[found] !== undefined && row[found] !== '') return row[found].trim();
+      }
+      return '';
+    };
+
+    // Build a lookup: node_name -> node row
+    const nodeByName: Record<string, Record<string, string>> = {};
+    for (const n of nodesData.rows) {
+      const name = col(n, 'node_name', 'name', 'node');
+      if (name) nodeByName[name.toLowerCase()] = n;
+    }
+
+    // Map supplier rows → NodeItem[], joining with node data via origin_nodes
+    const csvNodes: NodeItem[] = suppliersData.rows.map((s, idx) => {
+      const originNodeKey = col(s, 'origin_nodes', 'origin_node', 'node_name', 'node').toLowerCase();
+      const nodeRow = nodeByName[originNodeKey] ?? {};
+
+      const nodeName = col(nodeRow, 'node_name', 'name') || col(s, 'origin_nodes', 'origin_node', 'node_name') || `Node_${idx + 1}`;
+      const address  = col(nodeRow, 'address', 'location', 'city') || col(s, 'city', 'country', 'location', 'address') || '';
+      const nodeType = col(nodeRow, 'node_type', 'type', 'facility_type') || 'factory';
+
+      const latRaw = col(nodeRow, 'lat', 'latitude') || col(s, 'lat', 'latitude');
+      const lngRaw = col(nodeRow, 'lng', 'lon', 'longitude') || col(s, 'lng', 'lon', 'longitude');
+      const lat = latRaw ? parseFloat(latRaw) : 0;
+      const lng = lngRaw ? parseFloat(lngRaw) : 0;
+
+      const tier = col(s, 'tier', 'supplier_tier') || 'Tier 1';
+      const slaDaysRaw = col(s, 'sla_days', 'sla', 'lead_time_days');
+      const slaDays = slaDaysRaw ? parseInt(slaDaysRaw, 10) : 0;
+      const backupRaw = col(s, 'backup_supplier', 'is_backup').toLowerCase();
+      const backupSupplier = backupRaw === 'true' || backupRaw === '1' || backupRaw === 'yes';
+
+      return {
+        id: `csv-n${idx + 1}`,
+        name: nodeName,
+        lat: isNaN(lat) ? 0 : lat,
+        lng: isNaN(lng) ? 0 : lng,
+        tier,
+        address,
+        nodeType,
+        supplierName: col(s, 'supplier_n', 'supplier_name', 'name', 'company_name') || `Supplier_${idx + 1}`,
+        supplierEmail: col(s, 'email', 'supplier_email', 'contact_email') || '',
+        supplierProductCategory: col(s, 'products_categories', 'product_categories', 'products', 'product') || '',
+        supplierCategory: col(s, 'category', 'supplier_category', 'sector') || '',
+        slaDays: isNaN(slaDays) ? 0 : slaDays,
+        incoterm: col(s, 'incoterm', 'inco_term', 'trade_term') || 'FOB',
+        backupSupplier,
+      };
+    });
+
+    // Also incorporate any nodes that were NOT referenced by any supplier
+    const referencedNodeKeys = new Set(
+      suppliersData.rows.map((s) =>
+        col(s, 'origin_nodes', 'origin_node', 'node_name', 'node').toLowerCase()
+      )
+    );
+    for (const [key, nodeRow] of Object.entries(nodeByName)) {
+      if (!referencedNodeKeys.has(key)) {
+        const latRaw = col(nodeRow, 'lat', 'latitude');
+        const lngRaw = col(nodeRow, 'lng', 'lon', 'longitude');
+        const lat = latRaw ? parseFloat(latRaw) : 0;
+        const lng = lngRaw ? parseFloat(lngRaw) : 0;
+        csvNodes.push({
+          id: `csv-standalone-${key}`,
+          name: col(nodeRow, 'node_name', 'name') || key,
+          lat: isNaN(lat) ? 0 : lat,
+          lng: isNaN(lng) ? 0 : lng,
+          tier: col(nodeRow, 'tier') || 'Tier 1',
+          address: col(nodeRow, 'address', 'location', 'city') || '',
+          nodeType: col(nodeRow, 'node_type', 'type') || 'factory',
+          supplierName: '',
+          supplierEmail: '',
+        });
+      }
+    }
+
     const autoMappings: FieldMapping[] = [
       { id: 'm1', sourceFieldName: 'supplier_n', targetFieldName: 'supplier_name' },
       { id: 'm2', sourceFieldName: 'tier', targetFieldName: 'supplier_tier' },
@@ -155,41 +235,6 @@ export default function OnboardingPage(props: Props) {
       { id: 'm4', sourceFieldName: 'address', targetFieldName: 'node_address' },
     ];
     setFieldMappings(autoMappings);
-
-    // Setup typical CSV mapped nodes
-    const csvNodes: NodeItem[] = [
-      {
-        id: 'csv-n1', name: 'Factory A', lat: 13.0827, lng: 80.2707, tier: 'Tier 1',
-        address: 'Chennai India', nodeType: 'factory', supplierName: 'Supplier_1',
-        supplierEmail: 'supplier1@example.com', supplierProductCategory: 'Chemicals_Products',
-        supplierCategory: 'Chemicals', slaDays: 15, incoterm: 'FOB', backupSupplier: true,
-      },
-      {
-        id: 'csv-n2', name: 'Warehouse 1', lat: 19.0760, lng: 72.8777, tier: 'Tier 1',
-        address: 'Mumbai India', nodeType: 'warehouse', supplierName: 'Supplier_2',
-        supplierEmail: 'supplier2@example.com', supplierProductCategory: 'Automotive_Products',
-        supplierCategory: 'Automotiv', slaDays: 12, incoterm: 'CIF', backupSupplier: true,
-      },
-      {
-        id: 'csv-n3', name: 'Port Hub', lat: 18.9500, lng: 72.9500, tier: 'Tier 1',
-        address: 'Nhava Sheva Port', nodeType: 'port', supplierName: 'Inter-modal Transit Hub',
-        supplierEmail: 'port_dispatch@example.com', supplierProductCategory: 'Logistics',
-        supplierCategory: 'Logistics', slaDays: 2, incoterm: 'FOB', backupSupplier: false,
-      },
-      {
-        id: 'csv-n4', name: 'Factory B', lat: 12.9716, lng: 77.5946, tier: 'Tier 2',
-        address: 'Bangalore India', nodeType: 'factory', supplierName: 'Supplier_3',
-        supplierEmail: 'supplier3@example.com', supplierProductCategory: 'Electronics_Products',
-        supplierCategory: 'Electronics', slaDays: 8, incoterm: 'EXW', backupSupplier: false,
-      },
-      {
-        id: 'csv-n5', name: 'Distribution Center', lat: 28.7041, lng: 77.1025, tier: 'Tier 2',
-        address: 'Delhi India', nodeType: 'warehouse', supplierName: 'Supplier_4',
-        supplierEmail: 'supplier4@example.com', supplierProductCategory: 'Mechanical_Parts',
-        supplierCategory: 'Industrials', slaDays: 10, incoterm: 'FOB', backupSupplier: true,
-      }
-    ];
-
     setStagedNodes(csvNodes);
     setCurrentPage('FINALIZING_SYNC');
   };
