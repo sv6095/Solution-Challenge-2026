@@ -112,7 +112,12 @@ const DashboardLayout = () => {
   const { lastEvent, isConnected: wsConnected } = useWebSocket(tenantId);
   const hasToken = Boolean(getAccessToken());
 
-  const { data: onboardingStatus, isLoading: isOnboardingStatusLoading } = useQuery({
+  const {
+    data: onboardingStatus,
+    isLoading: isOnboardingStatusLoading,
+    isError: isOnboardingStatusError,
+    refetch: refetchOnboardingStatus,
+  } = useQuery({
     queryKey: ["onboarding-status", tenantId],
     queryFn: () => api.onboarding.status(tenantId),
     enabled: hasToken && !!tenantId,
@@ -377,6 +382,23 @@ const DashboardLayout = () => {
   const userInitial = displayName ? displayName.charAt(0).toUpperCase() : "U";
 
   if (!hasToken) return null;
+
+  if (isOnboardingStatusError) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-background/50 backdrop-blur-sm gap-4 px-6">
+        <p className="text-sm text-slate-600 text-center max-w-md">
+          Could not verify onboarding status. Check that the backend is running and try again.
+        </p>
+        <button
+          type="button"
+          onClick={() => refetchOnboardingStatus()}
+          className="px-6 py-2.5 bg-red-600 hover:bg-red-700 text-white font-mono text-xs uppercase tracking-wider rounded"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (isOnboardingStatusLoading || !onboardingStatus) {
     return (

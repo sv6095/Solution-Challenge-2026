@@ -28,8 +28,32 @@ export default function OnboardingPage(props: Props) {
   const queryClient = useQueryClient();
 
   const [currentPage, setCurrentPage] = useState<Page>('COMPANY_PROFILE');
+  const [companyProfile, setCompanyProfile] = useState<CompanyProfileData>({
+    companyName: "",
+    industry: "Manufacturing",
+    region: "Asia Pacific",
+    companySize: "51-200",
+    primaryContactName: "",
+    primaryContactEmail: ""
+  });
+  const [selectedSource, setSelectedSource] = useState<SourceType>('CSV');
+  const [trackerFileName, setTrackerFileName] = useState<string>('suppliers_v2.csv');
+  const [nodesFileName, setNodesFileName] = useState<string>('nodes_v2.csv');
+  const [connectedErps, setConnectedErps] = useState<ERPConfig[]>([]);
+  const [stagedNodes, setStagedNodes] = useState<NodeItem[]>([]);
+  const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([
+    { id: 'm1', sourceFieldName: 'supplier_n', targetFieldName: 'supplier_name' },
+    { id: 'm2', sourceFieldName: 'tier', targetFieldName: 'supplier_tier' },
+    { id: 'm3', sourceFieldName: 'node_name', targetFieldName: 'node_name' },
+    { id: 'm4', sourceFieldName: 'address', targetFieldName: 'node_address' },
+  ]);
 
-  const { data: onboardingStatus, isLoading: isOnboardingStatusLoading } = useQuery({
+  const {
+    data: onboardingStatus,
+    isLoading: isOnboardingStatusLoading,
+    isError: isOnboardingStatusError,
+    refetch: refetchOnboardingStatus,
+  } = useQuery({
     queryKey: ["onboarding-status", userId],
     queryFn: () => api.onboarding.status(userId),
     enabled: hasToken && !!userId,
@@ -47,16 +71,6 @@ export default function OnboardingPage(props: Props) {
     }
   }, [hasToken, onboardingStatus, embedded, currentPage, navigate, returnTo]);
 
-  // Autofill data
-  const [companyProfile, setCompanyProfile] = useState<CompanyProfileData>({
-    companyName: "",
-    industry: "Manufacturing",
-    region: "Asia Pacific",
-    companySize: "51-200",
-    primaryContactName: "",
-    primaryContactEmail: ""
-  });
-
   useEffect(() => {
     if (!userId) return;
     api.auth.profile(userId).then((reg) => {
@@ -69,9 +83,24 @@ export default function OnboardingPage(props: Props) {
     }).catch(() => {});
   }, [userId]);
 
-  const [selectedSource, setSelectedSource] = useState<SourceType>('CSV');
-
   if (!hasToken) return null;
+
+  if (isOnboardingStatusError) {
+    return (
+      <div className="w-full h-screen flex flex-col items-center justify-center bg-[#fafafa] gap-4 px-6">
+        <p className="text-sm text-slate-600 text-center max-w-md">
+          Could not verify onboarding status. Check that the backend is running and try again.
+        </p>
+        <button
+          type="button"
+          onClick={() => refetchOnboardingStatus()}
+          className="px-6 py-2.5 bg-brand-red hover:bg-brand-red-hover text-white font-mono text-xs uppercase tracking-wider"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (isOnboardingStatusLoading || (hasToken && !onboardingStatus)) {
     return (
@@ -90,18 +119,6 @@ export default function OnboardingPage(props: Props) {
   if (hasToken && onboardingStatus?.complete && !embedded && currentPage !== 'SUCCESS_SCREEN') {
     return null;
   }
-
-  // Input States Cached during flow
-  const [trackerFileName, setTrackerFileName] = useState<string>('suppliers_v2.csv');
-  const [nodesFileName, setNodesFileName] = useState<string>('nodes_v2.csv');
-  const [connectedErps, setConnectedErps] = useState<ERPConfig[]>([]);
-  const [stagedNodes, setStagedNodes] = useState<NodeItem[]>([]);
-  const [fieldMappings, setFieldMappings] = useState<FieldMapping[]>([
-    { id: 'm1', sourceFieldName: 'supplier_n', targetFieldName: 'supplier_name' },
-    { id: 'm2', sourceFieldName: 'tier', targetFieldName: 'supplier_tier' },
-    { id: 'm3', sourceFieldName: 'node_name', targetFieldName: 'node_name' },
-    { id: 'm4', sourceFieldName: 'address', targetFieldName: 'node_address' },
-  ]);
 
   // Page Navigation Triggers
   const handleSourceSelect = (source: SourceType) => {
@@ -246,7 +263,12 @@ export default function OnboardingPage(props: Props) {
         gmail_oauth_token: null,
         slack_webhook: null,
       });
-      queryClient.invalidateQueries({ queryKey: ["onboarding-status"] });
+      queryClient.setQueryData(["onboarding-status", userId], {
+        user_id: userId,
+        complete: true,
+        updated_at: new Date().toISOString(),
+      });
+      await queryClient.refetchQueries({ queryKey: ["onboarding-status", userId] });
       toast.success("Onboarding complete.");
       setCurrentPage('SUCCESS_SCREEN');
     } catch {
@@ -262,7 +284,8 @@ export default function OnboardingPage(props: Props) {
     setStagedNodes([]);
   };
 
-  const handleFinishSuccess = () => {
+  const handleFinishSuccess = async () => {
+    await queryClient.refetchQueries({ queryKey: ["onboarding-status", userId] });
     navigate(returnTo);
   };
 
