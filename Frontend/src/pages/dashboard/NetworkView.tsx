@@ -2174,6 +2174,28 @@ export default function NetworkView() {
     })).filter(n => isNum(n.lat) && isNum(n.lng)) as LogisticsNode[];
   }, [ctxRaw]);
 
+  const contextSuppliersRaw = useMemo(() => {
+    const rows = ctxRaw?.context?.suppliers;
+    return Array.isArray(rows) ? rows : [];
+  }, [ctxRaw]);
+
+  const supplierSourceRows = useMemo(() => {
+    const riskRows = Array.isArray(suppRaw) ? suppRaw : ((suppRaw as any)?.data || []);
+    if (riskRows.length > 0) return riskRows;
+    if (contextSuppliersRaw.length > 0) return contextSuppliersRaw;
+    return logisticsNodes.map((node, index) => ({
+      id: `node_${node.id || index}`,
+      supplier_id: `node_${node.id || index}`,
+      name: node.name,
+      country: "",
+      tier: node.tier,
+      lat: node.lat,
+      lng: node.lng,
+      category: node.type,
+      exposureScore: 50,
+    }));
+  }, [suppRaw, contextSuppliersRaw, logisticsNodes]);
+
   const mapCenter = useMemo(() => {
     if (logisticsNodes.length > 0) return [logisticsNodes[0].lng, logisticsNodes[0].lat] as [number, number];
     return DEFAULT_CENTER;
@@ -2204,18 +2226,17 @@ export default function NetworkView() {
     disasters.forEach((item) => item.country && set.add(item.country));
     gdelt.forEach((item) => item.country && set.add(item.country));
 
-    const supplierList = Array.isArray(suppRaw) ? suppRaw : (suppRaw as any)?.data || [];
-    supplierList.forEach((item: any) => item.country && set.add(String(item.country)));
+    supplierSourceRows.forEach((item: any) => item.country && set.add(String(item.country)));
 
     Object.keys(CC).forEach((country) => set.add(country));
 
     return [...set].sort((a, b) => a.localeCompare(b));
-  }, [instability, conflicts, disasters, gdelt, suppRaw]);
+  }, [instability, conflicts, disasters, gdelt, supplierSourceRows]);
 
   const impacted = useMemo(() => {
     const s = new Set<string>();
     const eList = Array.isArray(evtsRaw) ? evtsRaw : (evtsRaw as any)?.data || [];
-    const sList = Array.isArray(suppRaw) ? suppRaw : (suppRaw as any)?.data || [];
+    const sList = supplierSourceRows;
 
     eList.forEach((e: any) => {
       // 1. Explicit linkage from backend
@@ -2235,11 +2256,10 @@ export default function NetworkView() {
     });
 
     return s;
-  }, [evtsRaw, suppRaw]);
+  }, [evtsRaw, supplierSourceRows]);
 
   const suppliers = useMemo(() => {
-    const rawList = Array.isArray(suppRaw) ? suppRaw : (suppRaw as any)?.data || [];
-    return rawList.map(raw => {
+    return supplierSourceRows.map(raw => {
       const r = raw as any;
       const id = String(r.id ?? r.supplier_id ?? "").trim();
       const tier = parseTier(r.tier ?? r.tier_level);
@@ -2263,7 +2283,7 @@ export default function NetworkView() {
       id:string; name:string; country:string; tier:1|2|3; lng:number; lat:number;
       impacted:boolean; score:number; financial:number; operational:number; geopolitical:number;
     }[];
-  }, [suppRaw, impacted, instability]);
+  }, [supplierSourceRows, impacted, instability]);
 
   const tierColor = (tier:1|2|3, imp:boolean) =>
     imp ? "#ff4444" : tier===1 ? "#44ff88" : tier===2 ? "#ffaa00" : "#3b82f6";
