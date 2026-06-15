@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Box, RadioTower, RefreshCw } from "lucide-react";
 import { api, getUserId } from "@/lib/api";
 import { useWebSocket } from "@/hooks/use-websocket";
+import { toast } from "@/components/ui/sonner";
 import { Button } from "@/components/ui/button";
 import { SupplyChainGlobe } from "@/components/ar/SupplyChainGlobe";
 import { IncidentFlyoverMap } from "@/components/ar/IncidentFlyoverMap";
@@ -14,6 +15,7 @@ export default function ArView() {
   const { lastEvent } = useWebSocket(tenantId);
   const [selectedDisruption, setSelectedDisruption] = useState<ArAssetDisruption | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeFocusTick, setSelectedNodeFocusTick] = useState(0);
 
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["ar", "assets"],
@@ -44,6 +46,14 @@ export default function ArView() {
   const mapsApiKey = mapsConfig?.google_maps_api_key || import.meta.env.VITE_GOOGLE_MAPS_API_KEY || "";
   const onNodeClick = useCallback((node: ArAssetNode) => {
     setSelectedNodeId(String(node.id));
+    setSelectedNodeFocusTick((tick) => tick + 1);
+    const nodeType = String(node.type || "supplier").toLowerCase();
+    toast.success(
+      `${nodeType === "supplier" ? "Supplier node" : `${nodeType.charAt(0).toUpperCase()}${nodeType.slice(1)} node`} selected`,
+      {
+        description: `${node.name}${node.country ? ` | ${node.country}` : ""}${typeof node.exposureScore === "number" ? ` | Exposure ${Math.round(node.exposureScore)}` : ""}`,
+      },
+    );
   }, []);
 
   return (
@@ -100,7 +110,7 @@ export default function ArView() {
             routes={[]}
             disruptions={disruptions}
             className="h-[min(72vh,720px)] min-h-[520px] rounded-lg border border-slate-800"
-            focusKey={data?.updated_at}
+            focusKey={`${data?.updated_at ?? ""}:${selectedNodeFocusTick}`}
             selectedDisruptionId={selectedDisruptionId}
             selectedNodeId={selectedNodeId}
             onDisruptionClick={setSelectedDisruption}

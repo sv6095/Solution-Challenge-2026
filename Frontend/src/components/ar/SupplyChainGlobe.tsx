@@ -17,6 +17,14 @@ const modeLabel = (mode: string) => {
   return "Land";
 };
 
+const nodeLabel = (node: ArAssetNode) => {
+  const type = String(node.type || "supplier").toLowerCase();
+  if (type === "supplier") return "Supplier node";
+  if (type === "customer") return "Customer node";
+  if (type === "logistics") return "Logistics node";
+  return `${type.charAt(0).toUpperCase()}${type.slice(1)} node`;
+};
+
 const fmtMoney = fmtINR;
 
 
@@ -122,6 +130,10 @@ export function SupplyChainGlobe({
   const [globeSize, setGlobeSize] = useState({ width: 960, height: 620 });
 
   const activeRoutes = useMemo(() => routes.filter((route) => route.active), [routes]);
+  const supplierNodes = useMemo(
+    () => nodes.filter((node) => String(node.type || "").toLowerCase() === "supplier"),
+    [nodes],
+  );
 
   const htmlElements = useMemo<HtmlGlobeItem[]>(() => {
     const items: HtmlGlobeItem[] = disruptions.map((disruption) => ({
@@ -147,10 +159,23 @@ export function SupplyChainGlobe({
   }, [activeRoutes, disruptions, showRouteLabels]);
 
   const nodeColor = useCallback((node: ArAssetNode) => {
+    const type = String(node.type || "supplier").toLowerCase();
+    if (type === "customer") return "#38bdf8";
+    if (type === "logistics") return "#c084fc";
     const score = Number(node.exposureScore ?? 50);
     if (score >= 75 || node.criticality === "critical") return "#ef4444";
     if (score >= 60 || node.criticality === "high") return "#f59e0b";
     return "#22c55e";
+  }, []);
+
+  const nodeAltitude = useCallback((node: ArAssetNode) => {
+    const base = 0.035 + Math.min(0.05, Number(node.exposureScore ?? 50) / 2000);
+    return String(node.type || "supplier").toLowerCase() === "supplier" ? base + 0.01 : base;
+  }, []);
+
+  const nodeRadius = useCallback((node: ArAssetNode) => {
+    const base = Math.max(0.18, Math.min(0.45, Number(node.exposureScore ?? 45) / 180));
+    return String(node.type || "supplier").toLowerCase() === "supplier" ? base + 0.05 : base;
   }, []);
 
   const ringColor = useCallback((disruption: ArAssetDisruption) => {
@@ -238,10 +263,12 @@ export function SupplyChainGlobe({
         pointsData={nodes}
         pointLat="lat"
         pointLng="lng"
-        pointAltitude={(node: ArAssetNode) => 0.035 + Math.min(0.05, Number(node.exposureScore ?? 50) / 2000)}
-        pointRadius={(node: ArAssetNode) => Math.max(0.18, Math.min(0.45, Number(node.exposureScore ?? 45) / 180))}
+        pointAltitude={nodeAltitude}
+        pointRadius={nodeRadius}
         pointColor={nodeColor}
-        pointLabel={(node: ArAssetNode) => `${node.name}<br/>${node.country || "Unknown"}<br/>${node.tier || node.type}`}
+        pointLabel={(node: ArAssetNode) =>
+          `${nodeLabel(node)}<br/>${node.name}<br/>${node.country || "Unknown"}<br/>${node.tier || node.type}`
+        }
         onPointClick={(node: object) => {
           if (onNodeClick) onNodeClick(node as ArAssetNode);
         }}
@@ -278,6 +305,11 @@ export function SupplyChainGlobe({
               {mode}
             </span>
           ))}
+          {supplierNodes.length > 0 && (
+            <span className="rounded border border-emerald-400/30 bg-slate-950/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-200">
+              {supplierNodes.length} supplier node{supplierNodes.length === 1 ? "" : "s"}
+            </span>
+          )}
           {disruptions.length > 0 && (
             <span className="rounded border border-red-500/30 bg-slate-950/70 px-2 py-1 text-[10px] font-bold uppercase tracking-wider text-red-300">
               {disruptions.length} incident{disruptions.length === 1 ? "" : "s"}
