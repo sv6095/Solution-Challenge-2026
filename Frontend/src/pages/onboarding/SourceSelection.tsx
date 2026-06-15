@@ -228,7 +228,7 @@ export default function SourceSelection({
 
       {/* Footer Navigation Bar */}
       <footer id="source-footer" className="shrink-0 bg-white border-t border-gray-100 py-6 px-8">
-        <div className="max-w-6xl mx-auto flex items-center justify-between">
+        <div className="w-full flex items-center justify-between">
           <button
             id="btn-source-cancel"
             onClick={onCancel}
