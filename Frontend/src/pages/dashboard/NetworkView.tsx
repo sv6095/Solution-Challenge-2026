@@ -286,15 +286,16 @@ function Sparkline({ values }: { values: number[] }) {
 
 /* ── Stress gauge bar (worldmonitor renderStress style) ─────────── */
 function StressGauge({ score, level }: { score: number; level: string }) {
+  const safeLevel = String(level ?? "low").toLowerCase();
   const levelColor =
-    level === "critical" ? "#dc2626"
-    : level === "elevated" ? "#ea580c"
-    : level === "moderate" ? "#d97706"
+    safeLevel === "critical" ? "#dc2626"
+    : safeLevel === "elevated" ? "#ea580c"
+    : safeLevel === "moderate" ? "#d97706"
     : "#15803d";
   const gaugeBg =
-    level === "critical" ? "rgba(220,38,38,0.10)"
-    : level === "elevated" ? "rgba(234,88,12,0.10)"
-    : level === "moderate" ? "rgba(217,119,6,0.10)"
+    safeLevel === "critical" ? "rgba(220,38,38,0.10)"
+    : safeLevel === "elevated" ? "rgba(234,88,12,0.10)"
+    : safeLevel === "moderate" ? "rgba(217,119,6,0.10)"
     : "rgba(21,128,61,0.10)";
   const w = Math.round(Math.min(100, Math.max(0, score)));
   return (
@@ -302,7 +303,7 @@ function StressGauge({ score, level }: { score: number; level: string }) {
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:6 }}>
         <span style={{ fontSize:13, color:"var(--text-dim)", textTransform:"uppercase", letterSpacing:"0.06em" }}>Composite Stress Score</span>
         <span style={{ fontSize:13, fontWeight:700, padding:"2px 7px", borderRadius:3, background:gaugeBg, color:levelColor }}>
-          {level.toUpperCase()}
+          {safeLevel.toUpperCase()}
         </span>
       </div>
       <div style={{ position:"relative", height:6, borderRadius:3, background:"rgba(0,0,0,0.08)" }}>
