@@ -2762,10 +2762,23 @@ async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[st
                 "endLng": node["lng"],
             })
 
-    active_incidents = [
-        inc for inc in list_incidents(status=None, limit=100, tenant_id=tenant_id)
-        if str(inc.get("status") or "").upper() in {"DETECTED", "ANALYZED", "AWAITING_APPROVAL"}
+    active_statuses = {"DETECTED", "ANALYZED", "AWAITING_APPROVAL"}
+    operational_incidents = [
+        inc for inc in list_incidents(status=None, limit=200, tenant_id=tenant_id)
+        if str(inc.get("status") or "").upper() in active_statuses
     ]
+    simulation_incidents = [
+        inc for inc in list_simulation_incidents(status=None, limit=200, tenant_id=tenant_id)
+        if str(inc.get("status") or "").upper() in active_statuses
+    ]
+    seen_incident_ids: set[str] = set()
+    active_incidents: list[dict[str, Any]] = []
+    for inc in [*operational_incidents, *simulation_incidents]:
+        inc_id = str(inc.get("id") or inc.get("incident_id") or "").strip()
+        if not inc_id or inc_id in seen_incident_ids:
+            continue
+        seen_incident_ids.add(inc_id)
+        active_incidents.append(inc)
     disruptions = []
     for inc in active_incidents:
         event_payload = inc.get("event") if isinstance(inc.get("event"), dict) else {}
@@ -2792,6 +2805,26 @@ async def api_ar_assets(user=Depends(verify_firebase_or_local_token)) -> dict[st
                         break
             if match:
                 lat_f, lng_f = match["lat"], match["lng"]
+        # Land events often carry coordinates only inside affected node/supplier payloads.
+        if lat_f == 0 and lng_f == 0:
+            candidates: list[tuple[float, float]] = []
+            for node in (inc.get("affected_nodes") if isinstance(inc.get("affected_nodes"), list) else []):
+                if not isinstance(node, dict):
+                    continue
+                nlat = _ar_float(node.get("lat") or node.get("latitude"))
+                nlng = _ar_float(node.get("lng") or node.get("longitude"))
+                if not (nlat == 0 and nlng == 0):
+                    candidates.append((nlat, nlng))
+            for sup in (inc.get("affected_suppliers") if isinstance(inc.get("affected_suppliers"), list) else []):
+                if not isinstance(sup, dict):
+                    continue
+                slat = _ar_float(sup.get("lat") or sup.get("latitude"))
+                slng = _ar_float(sup.get("lng") or sup.get("longitude"))
+                if not (slat == 0 and slng == 0):
+                    candidates.append((slat, slng))
+            if candidates:
+                lat_f = sum(c[0] for c in candidates) / len(candidates)
+                lng_f = sum(c[1] for c in candidates) / len(candidates)
         if lat_f == 0 and lng_f == 0:
             continue
         disruptions.append({
@@ -4106,10 +4139,26 @@ async def api_command_briefing(response: Response, user=Depends(verify_firebase_
         from collections import Counter
         from services.event_freshness import is_incident_fresh
 
-        # Single Firestore scan for both all_incidents and summary_incidents.
-        # Previously two separate queries (limit=100 + limit=500) were issued.
-        summary_incidents = [i for i in list_incidents(limit=500, tenant_id=tenant_id) if is_incident_fresh(i)]
-        all_incidents = summary_incidents[:100]
+        active_statuses = ("DETECTED", "ANALYZED", "AWAITING_APPROVAL")
+
+        operational = [i for i in list_incidents(limit=500, tenant_id=tenant_id) if is_incident_fresh(i)]
+        simulation = [i for i in list_simulation_incidents(limit=500, tenant_id=tenant_id) if is_incident_fresh(i)]
+
+        # Merge operational + simulation incidents and dedupe by stable identity.
+        seen_keys: set[str] = set()
+        merged_incidents: list[dict[str, Any]] = []
+        for inc in [*operational, *simulation]:
+            key = str(inc.get("id") or "").strip() or (
+                f"{str(inc.get('event_title') or inc.get('title') or '').strip().lower()}|"
+                f"{str(inc.get('created_at') or '').strip()}"
+            )
+            if not key or key in seen_keys:
+                continue
+            seen_keys.add(key)
+            merged_incidents.append(inc)
+
+        summary_incidents = merged_incidents
+        all_incidents = merged_incidents[:100]
 
         # Derive status counts from the fetched list — avoids a separate
         # count_incidents_by_status() call that fetches another 1000 docs.
@@ -4121,9 +4170,8 @@ async def api_command_briefing(response: Response, user=Depends(verify_firebase_
         critical_count = len([
             i for i in summary_incidents
             if i.get("severity") in ("CRITICAL", "HIGH")
-            and i.get("status") in ("DETECTED", "ANALYZED", "AWAITING_APPROVAL")
+            and i.get("status") in active_statuses
         ])
-        active_statuses = ("DETECTED", "ANALYZED", "AWAITING_APPROVAL")
         watch_count = len([
             i for i in summary_incidents
             if i.get("severity") in ("MODERATE", "LOW")
@@ -4135,7 +4183,10 @@ async def api_command_briefing(response: Response, user=Depends(verify_firebase_
             seen: set[str] = set()
             deduped: list[dict[str, Any]] = []
             for inc in items:
-                key = str(inc.get("event_title") or inc.get("title") or inc.get("id") or "").strip().lower()
+                key = str(inc.get("id") or "").strip() or (
+                    f"{str(inc.get('event_title') or inc.get('title') or '').strip().lower()}|"
+                    f"{str(inc.get('created_at') or '').strip()}"
+                )
                 if not key or key in seen:
                     continue
                 seen.add(key)
