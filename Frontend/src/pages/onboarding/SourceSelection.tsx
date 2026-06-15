@@ -23,7 +23,7 @@ export default function SourceSelection({
   };
 
   return (
-    <div id="source-selection-container" className="min-h-screen bg-[#fafafa] flex flex-col justify-between font-sans text-gray-800">
+    <div id="source-selection-container" className="h-screen bg-[#fafafa] flex flex-col font-sans text-gray-800 overflow-hidden">
       {/* Upper Brand / Progress Header */}
       <header id="source-header" className="bg-white border-b border-gray-100 py-4 px-8">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -74,7 +74,7 @@ export default function SourceSelection({
       </header>
 
       {/* Main Content Area */}
-      <main id="source-main-content" className="flex-1 py-16 px-4 md:px-8 max-w-7xl mx-auto w-full flex flex-col justify-center items-center">
+      <main id="source-main-content" className="flex-1 overflow-y-auto py-16 px-4 md:px-8 w-full flex flex-col justify-center items-center">
         <div className="text-center max-w-2xl mb-12">
           <h1 className="font-display text-4xl font-bold text-gray-900 mb-4 tracking-tight">
             Select Data Source
@@ -227,7 +227,7 @@ export default function SourceSelection({
       </main>
 
       {/* Footer Navigation Bar */}
-      <footer id="source-footer" className="bg-white border-t border-gray-100 py-6 px-8">
+      <footer id="source-footer" className="shrink-0 bg-white border-t border-gray-100 py-6 px-8">
         <div className="max-w-6xl mx-auto flex items-center justify-between">
           <button
             id="btn-source-cancel"
