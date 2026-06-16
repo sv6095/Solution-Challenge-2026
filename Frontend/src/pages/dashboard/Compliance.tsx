@@ -92,33 +92,33 @@ const Compliance = () => {
   const { data: incidents = [] } = useQuery({
     queryKey: ["incidents"],
     queryFn: () => authFetch<unknown[]>(`${BASE}/incidents`),
-    refetchInterval: 30_000,
+    staleTime: 15 * 60 * 1000,
   });
 
   const { data: auditLog = [] } = useQuery({
     queryKey: ["audit"],
     queryFn: () => authFetch<unknown[]>(`${BASE}/audit`),
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
   });
 
   const { data: postActionData } = useQuery({
     queryKey: ["post-action-list"],
     queryFn: () => authFetch<{ records: any[]; total: number }>(`${BASE}/governance/post-action`),
-    refetchInterval: 30_000,
+    staleTime: 15 * 60 * 1000,
     enabled: tab === "post-action",
   });
 
   const { data: replayData } = useQuery({
     queryKey: ["replay-history"],
     queryFn: () => authFetch<{ runs: any[]; total: number }>(`${BASE}/governance/replay/history`),
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
     enabled: tab === "replay",
   });
 
   const { data: govMetrics } = useQuery({
     queryKey: ["governance-summary"],
     queryFn: () => authFetch<any>(`${BASE}/governance/summary`),
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
     enabled: tab === "metrics",
   });
 

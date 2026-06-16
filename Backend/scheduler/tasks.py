@@ -3,11 +3,46 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from typing import Any
+from uuid import uuid4
 
 from scheduler.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+_LOCK_TTL_SECONDS = max(30, int(os.getenv("SCHEDULER_TASK_LOCK_TTL_SECONDS", "540")))
+
+
+def _acquire_task_lock(name: str) -> tuple[Any | None, str | None]:
+    try:
+        from redis import Redis
+
+        client = Redis.from_url(
+            os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            decode_responses=True,
+            socket_connect_timeout=1.0,
+            socket_timeout=2.0,
+        )
+        token = uuid4().hex
+        acquired = client.set(f"scheduler:lock:{name}", token, nx=True, ex=_LOCK_TTL_SECONDS)
+        if acquired:
+            return client, token
+        return client, None
+    except Exception:
+        return None, None
+
+
+def _release_task_lock(client: Any, name: str, token: str) -> None:
+    try:
+        client.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) else return 0 end",
+            1,
+            f"scheduler:lock:{name}",
+            token,
+        )
+    except Exception:
+        pass
 
 
 def _run_async(coro: Any) -> Any:
@@ -19,6 +54,10 @@ def _run_async(coro: Any) -> Any:
 def poll_signals(self) -> dict[str, Any]:
     """Poll external signal sources and generate incidents outside the API process."""
     logger.info("Executing Celery task: signal ingestion")
+    client, token = _acquire_task_lock("poll_signals")
+    if client is not None and token is None:
+        logger.info("Skipping poll_signals: another worker is already running it")
+        return {"status": "skipped", "message": "poll_signals already in progress"}
     try:
         from scheduler.signal_poll import _poll_sources
 
@@ -27,12 +66,19 @@ def poll_signals(self) -> dict[str, Any]:
     except Exception as exc:
         logger.exception("Signal ingestion failed")
         raise self.retry(exc=exc, countdown=60)
+    finally:
+        if client is not None and token:
+            _release_task_lock(client, "poll_signals", token)
 
 
 @celery_app.task(bind=True, max_retries=2, name="scheduler.tasks.refresh_worldmonitor")
 def refresh_worldmonitor(self) -> dict[str, Any]:
     """Refresh the WorldMonitor datasets without tying up a request worker."""
     logger.info("Executing Celery task: worldmonitor refresh")
+    client, token = _acquire_task_lock("refresh_worldmonitor")
+    if client is not None and token is None:
+        logger.info("Skipping refresh_worldmonitor: another worker is already running it")
+        return {"status": "skipped", "message": "refresh_worldmonitor already in progress"}
     try:
         from services.worldmonitor_fetcher import run_all_fetchers_once
 
@@ -41,6 +87,9 @@ def refresh_worldmonitor(self) -> dict[str, Any]:
     except Exception as exc:
         logger.exception("WorldMonitor refresh failed")
         raise self.retry(exc=exc, countdown=60)
+    finally:
+        if client is not None and token:
+            _release_task_lock(client, "refresh_worldmonitor", token)
 
 
 @celery_app.task(bind=True, max_retries=1, name="scheduler.tasks.train_xgboost")

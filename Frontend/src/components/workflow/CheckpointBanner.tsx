@@ -57,7 +57,7 @@ export function CheckpointBanner({ incidentId }: Props) {
       if (!r.ok) return { checkpoint: null };
       return r.json();
     },
-    refetchInterval: 30_000,
+    staleTime: 5 * 60 * 1000,
     enabled: !!incidentId,
   });
 

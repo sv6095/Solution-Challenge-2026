@@ -30,7 +30,9 @@ const queryClient = new QueryClient({
       // Prevent hidden tabs from continuously polling expensive backend endpoints.
       refetchIntervalInBackground: false,
       refetchOnWindowFocus: false,
-      refetchOnReconnect: true,
+      refetchOnReconnect: false,
+      refetchOnMount: false,
+      staleTime: 15 * 60 * 1000,
       retry: 1,
     },
   },

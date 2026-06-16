@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
+from uuid import uuid4
 from typing import Any
 
 from .firestore_store import cache_get_entry, cache_prune_expired, cache_set_entry
@@ -13,6 +15,8 @@ REDIS_URL = (os.getenv("REDIS_URL") or "redis://localhost:6379/0").strip()
 # In-memory: value -> (payload, expires_at_monotonic or None)
 _memory: dict[str, tuple[Any, float | None]] = {}
 _redis_client: Any | None = None
+_singleflight_locks: dict[str, asyncio.Lock] = {}
+_singleflight_guard = asyncio.Lock()
 
 
 def _cache_provider() -> str:
@@ -114,3 +118,96 @@ async def cache_set(key: str, value: Any, ttl_seconds: int = 1800) -> None:
     cache_prune_expired()
     _memory_set(key, value, ttl_seconds)
     _asyncio.ensure_future(_background_firestore_write())
+
+
+async def _acquire_distributed_lock(
+    key: str,
+    *,
+    lock_timeout_seconds: int,
+) -> tuple[Any | None, str | None, str | None, bool]:
+    if _cache_provider() != "redis":
+        return None, None, None, False
+    client = await _get_redis_client()
+    if client is None:
+        return None, None, None, False
+    lock_key = f"lock:{key}"
+    token = uuid4().hex
+    try:
+        acquired = await client.set(lock_key, token, nx=True, ex=max(1, lock_timeout_seconds))
+        return client, lock_key, token, bool(acquired)
+    except Exception:
+        return None, None, None, False
+
+
+async def _release_distributed_lock(client: Any, lock_key: str, token: str) -> None:
+    try:
+        # Release only when this owner still holds the lock.
+        await client.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) else return 0 end",
+            1,
+            lock_key,
+            token,
+        )
+    except Exception:
+        pass
+
+
+async def _singleflight_lock_for(key: str) -> asyncio.Lock:
+    async with _singleflight_guard:
+        lock = _singleflight_locks.get(key)
+        if lock is None:
+            lock = asyncio.Lock()
+            _singleflight_locks[key] = lock
+        return lock
+
+
+async def cache_get_or_set(
+    key: str,
+    producer: Any,
+    *,
+    ttl_seconds: int = 1800,
+    lock_timeout_seconds: int = 15,
+    wait_timeout_seconds: float = 3.0,
+) -> Any:
+    """
+    Read-through cache with local single-flight and optional Redis distributed lock.
+
+    Prevents cache stampedes on TTL expiry when many concurrent requests ask for
+    the same key at once.
+    """
+    cached = await cache_get(key)
+    if cached is not None:
+        return cached
+
+    lock = await _singleflight_lock_for(key)
+    async with lock:
+        cached = await cache_get(key)
+        if cached is not None:
+            return cached
+
+        client, lock_key, token, acquired = await _acquire_distributed_lock(
+            key,
+            lock_timeout_seconds=lock_timeout_seconds,
+        )
+
+        if not acquired and client is not None:
+            deadline = time.monotonic() + max(0.1, wait_timeout_seconds)
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.1)
+                cached = await cache_get(key)
+                if cached is not None:
+                    return cached
+
+        try:
+            cached = await cache_get(key)
+            if cached is not None:
+                return cached
+            data = producer() if callable(producer) else producer
+            if asyncio.iscoroutine(data):
+                data = await data
+            await cache_set(key, data, ttl_seconds=ttl_seconds)
+            return data
+        finally:
+            if acquired and client is not None and lock_key and token:
+                await _release_distributed_lock(client, lock_key, token)

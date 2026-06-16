@@ -59,12 +59,12 @@ const Intelligence = () => {
   const { data: categorized = {} } = useQuery({
     queryKey: ["signals", "categorized"],
     queryFn: api.signals.categorized,
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
   });
   const { data: events = [] } = useQuery<RiskEvent[]>({
     queryKey: ["risks", "events"],
     queryFn: () => api.risks.events(),
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
   });
   const refresh = useMutation({
     mutationFn: api.signals.refresh,

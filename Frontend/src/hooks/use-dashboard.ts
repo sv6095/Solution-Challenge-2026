@@ -6,30 +6,30 @@ const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
 
 /* ─── Dashboard Home ────────────────────────────────────────── */
 export const useDashboardKpis = () =>
-  useQuery({ queryKey: ["dashboard", "kpis"], queryFn: api.dashboard.kpis, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["dashboard", "kpis"], queryFn: api.dashboard.kpis, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useDashboardEvents = () =>
-  useQuery({ queryKey: ["dashboard", "events"], queryFn: api.dashboard.events, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["dashboard", "events"], queryFn: api.dashboard.events, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useDashboardWorkflows = () =>
-  useQuery({ queryKey: ["dashboard", "workflows"], queryFn: api.dashboard.workflows, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["dashboard", "workflows"], queryFn: api.dashboard.workflows, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useDashboardSuppliers = () =>
-  useQuery({ queryKey: ["dashboard", "suppliers"], queryFn: api.dashboard.suppliers, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["dashboard", "suppliers"], queryFn: api.dashboard.suppliers, staleTime: FIFTEEN_MINUTES_MS });
 
 /* ─── Risk Map ───────────────────────────────────────────────── */
 export const useRiskEvents = (params?: { region?: string; severity?: string }) =>
   useQuery({
     queryKey: ["risks", "events", params],
     queryFn: () => api.risks.events(params),
-    refetchInterval: FIFTEEN_MINUTES_MS,
+    staleTime: FIFTEEN_MINUTES_MS,
   });
 
 export const useRiskSuppliers = (params?: { tier?: string; minScore?: number; maxScore?: number }) =>
   useQuery({
     queryKey: ["risks", "suppliers", params],
     queryFn: () => api.risks.suppliers(params),
-    refetchInterval: FIFTEEN_MINUTES_MS,
+    staleTime: FIFTEEN_MINUTES_MS,
   });
 
 /* ─── Route Intelligence ─────────────────────────────────────── */
@@ -38,24 +38,24 @@ export const useRoutes = (origin?: string, destination?: string, mode?: string) 
     queryKey: ["routes", origin, destination, mode],
     queryFn: () => api.routes.list(origin, destination, mode),
     enabled: !!(origin && destination),
-    refetchInterval: FIFTEEN_MINUTES_MS,
+    staleTime: FIFTEEN_MINUTES_MS,
   });
 
 /* ─── Signal Monitor ─────────────────────────────────────────── */
 export const useHazards = () =>
-  useQuery({ queryKey: ["signals", "hazards"], queryFn: api.signals.hazards, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["signals", "hazards"], queryFn: api.signals.hazards, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useNewsSignals = () =>
-  useQuery({ queryKey: ["signals", "news"], queryFn: api.signals.news, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["signals", "news"], queryFn: api.signals.news, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useDataSources = () =>
-  useQuery({ queryKey: ["signals", "sources"], queryFn: api.signals.sources, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["signals", "sources"], queryFn: api.signals.sources, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useCategorizedSignals = () =>
-  useQuery({ queryKey: ["signals", "categorized"], queryFn: api.signals.categorized, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["signals", "categorized"], queryFn: api.signals.categorized, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useSentimentSignals = () =>
-  useQuery({ queryKey: ["signals", "sentiment"], queryFn: api.signals.sentiment, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["signals", "sentiment"], queryFn: api.signals.sentiment, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useRefreshSignals = () => {
   const qc = useQueryClient();
@@ -69,11 +69,11 @@ export const useRefreshSignals = () => {
 
 /* ─── Audit Log ──────────────────────────────────────────────── */
 export const useAuditLog = () =>
-  useQuery({ queryKey: ["audit"], queryFn: api.audit.list, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["audit"], queryFn: api.audit.list, staleTime: FIFTEEN_MINUTES_MS });
 
 /* ─── RFQ Manager ────────────────────────────────────────────── */
 export const useRFQs = (status?: string) =>
-  useQuery({ queryKey: ["rfq", status], queryFn: () => api.rfq.list(status), refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["rfq", status], queryFn: () => api.rfq.list(status), staleTime: FIFTEEN_MINUTES_MS });
 
 export const useCreateRFQ = () => {
   const qc = useQueryClient();
@@ -96,7 +96,7 @@ export const useRFQThread = (rfqId?: string | null) =>
     queryKey: ["rfq", "thread", rfqId],
     queryFn: () => api.rfq.thread(rfqId as string),
     enabled: !!rfqId,
-    refetchInterval: FIFTEEN_MINUTES_MS,
+    staleTime: FIFTEEN_MINUTES_MS,
   });
 
 export const useAddRFQThreadMessage = () => {
@@ -110,21 +110,21 @@ export const useAddRFQThreadMessage = () => {
 
 /* ─── Workflows (audit reports) ─────────────────────────────── */
 export const useWorkflowReports = () =>
-  useQuery({ queryKey: ["workflows"], queryFn: api.workflows.list, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["workflows"], queryFn: api.workflows.list, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useComplianceSummary = () =>
-  useQuery({ queryKey: ["audit", "compliance"], queryFn: api.compliance.summary, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["audit", "compliance"], queryFn: api.compliance.summary, staleTime: FIFTEEN_MINUTES_MS });
 
 /* ─── Exposure Scores ────────────────────────────────────────── */
 export const useExposureSummary = () =>
-  useQuery({ queryKey: ["exposure", "summary"], queryFn: api.exposure.summary, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["exposure", "summary"], queryFn: api.exposure.summary, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useExposureSuppliers = () =>
-  useQuery({ queryKey: ["exposure", "suppliers"], queryFn: api.exposure.suppliers, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["exposure", "suppliers"], queryFn: api.exposure.suppliers, staleTime: FIFTEEN_MINUTES_MS });
 
 /* ─── Settings ───────────────────────────────────────────────── */
 export const useProfile = () =>
-  useQuery({ queryKey: ["settings", "profile"], queryFn: api.settings.profile, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["settings", "profile"], queryFn: api.settings.profile, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useUpdateProfile = () => {
   const qc = useQueryClient();
@@ -135,7 +135,7 @@ export const useUpdateProfile = () => {
 };
 
 export const useBilling = () =>
-  useQuery({ queryKey: ["settings", "billing"], queryFn: api.settings.billing, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["settings", "billing"], queryFn: api.settings.billing, staleTime: FIFTEEN_MINUTES_MS });
 
 export const useNetworkGraph = () =>
-  useQuery({ queryKey: ["network", "graph"], queryFn: api.network.graph, refetchInterval: FIFTEEN_MINUTES_MS });
+  useQuery({ queryKey: ["network", "graph"], queryFn: api.network.graph, staleTime: FIFTEEN_MINUTES_MS });

@@ -94,7 +94,7 @@ from services.monte_carlo import simulate_incident_monte_carlo
 from services.intelligence_gap_tracker import build_intelligence_gap_report
 from services.threshold_tuner import get_all_thresholds, compute_stage_metrics, threshold_tuning_history
 from services.event_bus import websocket_handler as ws_handler, connection_count as ws_connection_count, broadcast as ws_broadcast
-from services.cache_provider import cache_get, cache_set
+from services.cache_provider import cache_get_or_set
 from models.supply_graph import CustomerSupplyGraph
 
 app = FastAPI(title="SupplyShield API", version="0.2.0")
@@ -143,14 +143,11 @@ def _set_cache_headers(response: Response, *, public: bool, max_age: int = 30) -
 
 
 async def _cached_json(cache_key: str, ttl_seconds: int, producer) -> Any:
-    cached = await cache_get(cache_key)
-    if cached is not None:
-        return cached
-    data = producer()
-    if asyncio.iscoroutine(data):
-        data = await data
-    await cache_set(cache_key, data, ttl_seconds=ttl_seconds)
-    return data
+    return await cache_get_or_set(
+        cache_key,
+        producer,
+        ttl_seconds=ttl_seconds,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -4574,7 +4571,7 @@ async def api_replay_history(user=Depends(verify_firebase_or_local_token)) -> di
 # No auth required (public intelligence layer)
 # ===========================================================================
 
-async def _cached_global_response(response: Response, suffix: str, producer, ttl_seconds: int = 60) -> Any:
+async def _cached_global_response(response: Response, suffix: str, producer, ttl_seconds: int = 900) -> Any:
     _set_cache_headers(response, public=True, max_age=30)
     data = await _cached_json(f"api:global:{suffix}", ttl_seconds, producer)
     return jsonable_encoder(data)
@@ -4617,7 +4614,7 @@ async def api_global_gdelt(response: Response):
         response,
         "gdelt",
         lambda: {"data": get_gdalt_events(), "source": "GDELT"},
-        ttl_seconds=120,
+        ttl_seconds=900,
     )
 
 
@@ -4740,7 +4737,7 @@ async def api_global_market_implications(response: Response):
         response,
         "market-implications",
         get_market_implications,
-        ttl_seconds=120,
+        ttl_seconds=900,
     )
 
 
@@ -4895,7 +4892,7 @@ async def api_global_dashboard_bundle(response: Response):
             response,
             "dashboard-bundle",
             lambda: _build_global_dashboard_bundle_from_snapshot(get_worldmonitor_bundle_snapshot()),
-            ttl_seconds=60,
+            ttl_seconds=900,
         )
     except Exception as exc:
         logger.exception("dashboard-bundle failed: %s", exc)

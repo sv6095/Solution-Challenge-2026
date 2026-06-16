@@ -228,17 +228,17 @@ const CommandCenter = () => {
   const { data: briefing, isLoading } = useQuery({
     queryKey: ["command", "briefing"],
     queryFn: () => api.incidents.briefing(),
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
   });
   const { data: incidentsRaw = [], isLoading: isIncidentsLoading } = useQuery({
     queryKey: ["incidents", "command-center-active"],
     queryFn: () => api.incidents.list(),
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
   });
   const { data: simulationIncidentsRaw = [], isLoading: isSimulationLoading } = useQuery({
     queryKey: ["intelligence", "simulation-incidents", "command-center"],
     queryFn: () => api.intelligence.simulationIncidents(),
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
   });
 
   const generate = useMutation({

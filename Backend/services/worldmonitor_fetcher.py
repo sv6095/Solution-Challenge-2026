@@ -49,6 +49,7 @@ import json
 import logging
 import os
 import time
+from uuid import uuid4
 from threading import Lock
 from datetime import datetime, timezone
 from typing import Any
@@ -60,9 +61,17 @@ from services.firestore_store import _client, _safe_doc_id
 
 logger = logging.getLogger(__name__)
 _GDELT_RATE_LIMIT_UNTIL: float = 0.0
-_READ_CACHE_TTL_SECONDS = max(1, int(os.getenv("WORLDMONITOR_READ_CACHE_SECONDS", "30")))
+_READ_CACHE_TTL_SECONDS = max(30, int(os.getenv("WORLDMONITOR_READ_CACHE_SECONDS", "300")))
 _READ_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _READ_CACHE_LOCK = Lock()
+_READ_FETCH_LOCKS: dict[str, Lock] = {}
+_READ_FETCH_LOCKS_LOCK = Lock()
+_REDIS_CLIENT: Any | None = None
+_REDIS_CLIENT_LOCK = Lock()
+_REDIS_CACHE_PREFIX = "worldmonitor:cache:"
+_REDIS_LOCK_PREFIX = "worldmonitor:lock:"
+_REDIS_LOCK_TTL_SECONDS = max(2, int(os.getenv("WORLDMONITOR_REDIS_LOCK_SECONDS", "10")))
+_REDIS_LOCK_WAIT_SECONDS = max(0.2, float(os.getenv("WORLDMONITOR_REDIS_LOCK_WAIT_SECONDS", "3")))
 
 # ── API keys from environment (worldmonitor conventions) ─────────────────────
 
@@ -125,6 +134,7 @@ CRITICAL_MINERALS = [
     {"id": "copper",   "name": "Copper",   "primary_producer": "Chile",  "share_pct": 28},
     {"id": "graphite", "name": "Graphite", "primary_producer": "China",  "share_pct": 79},
 ]
+_WORLDMONITOR_BUNDLE_KEY = "worldmonitor_bundle_snapshot_v1"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DB helpers
@@ -139,35 +149,200 @@ def _db_upsert(table: str, key: str, data: Any) -> None:
         "payload": data,
         "fetched_at": fetched_at,
     }, merge=True)
-    # Update hot read cache immediately so callers avoid an extra Firestore read.
+    payload = {"data": data, "fetched_at": fetched_at}
+    _set_l1_cache(key, payload)
+    _redis_set_payload(key, payload)
+
+
+def _set_l1_cache(key: str, payload: dict[str, Any]) -> None:
     with _READ_CACHE_LOCK:
-        _READ_CACHE[key] = (time.monotonic() + _READ_CACHE_TTL_SECONDS, {"data": data, "fetched_at": fetched_at})
+        _READ_CACHE[key] = (time.monotonic() + _READ_CACHE_TTL_SECONDS, payload)
+
+
+def _get_l1_cache(key: str) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    now = time.monotonic()
+    with _READ_CACHE_LOCK:
+        cached = _READ_CACHE.get(key)
+        if not cached:
+            return None, None
+        payload = cached[1]
+        stale = payload if isinstance(payload, dict) else None
+        if cached[0] > now:
+            return stale, stale
+        return None, stale
+
+
+def _redis_client() -> Any | None:
+    global _REDIS_CLIENT
+    if _REDIS_CLIENT is not None:
+        return _REDIS_CLIENT
+    with _REDIS_CLIENT_LOCK:
+        if _REDIS_CLIENT is not None:
+            return _REDIS_CLIENT
+        try:
+            from redis import Redis
+
+            _REDIS_CLIENT = Redis.from_url(
+                os.getenv("REDIS_URL", "redis://localhost:6379/0"),
+                decode_responses=True,
+                socket_connect_timeout=1.0,
+                socket_timeout=2.0,
+            )
+            _REDIS_CLIENT.ping()
+            return _REDIS_CLIENT
+        except Exception:
+            _REDIS_CLIENT = None
+            return None
+
+
+def _redis_cache_key(key: str) -> str:
+    return f"{_REDIS_CACHE_PREFIX}{key}"
+
+
+def _redis_lock_key(key: str) -> str:
+    return f"{_REDIS_LOCK_PREFIX}{key}"
+
+
+def _redis_get_payload(key: str) -> dict[str, Any] | None:
+    client = _redis_client()
+    if client is None:
+        return None
+    try:
+        raw = client.get(_redis_cache_key(key))
+        if not raw:
+            return None
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+        return None
+    except Exception:
+        return None
+
+
+def _redis_set_payload(key: str, payload: dict[str, Any]) -> None:
+    client = _redis_client()
+    if client is None:
+        return
+    try:
+        client.set(_redis_cache_key(key), json.dumps(payload), ex=_READ_CACHE_TTL_SECONDS)
+    except Exception:
+        pass
+
+
+def _redis_get_many_payloads(keys: list[str]) -> dict[str, dict[str, Any]]:
+    client = _redis_client()
+    if client is None or not keys:
+        return {}
+    try:
+        raw_values = client.mget([_redis_cache_key(key) for key in keys])
+    except Exception:
+        return {}
+    rows: dict[str, dict[str, Any]] = {}
+    for key, raw in zip(keys, raw_values):
+        if not raw:
+            continue
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            continue
+        if isinstance(parsed, dict):
+            rows[key] = parsed
+    return rows
+
+
+def _redis_acquire_lock(key: str) -> tuple[Any | None, str | None]:
+    client = _redis_client()
+    if client is None:
+        return None, None
+    token = uuid4().hex
+    try:
+        acquired = client.set(
+            _redis_lock_key(key),
+            token,
+            nx=True,
+            ex=_REDIS_LOCK_TTL_SECONDS,
+        )
+        if acquired:
+            return client, token
+        return client, None
+    except Exception:
+        return None, None
+
+
+def _redis_release_lock(client: Any, key: str, token: str) -> None:
+    try:
+        client.eval(
+            "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            "return redis.call('del', KEYS[1]) else return 0 end",
+            1,
+            _redis_lock_key(key),
+            token,
+        )
+    except Exception:
+        pass
+
+
+def _read_from_firestore(key: str) -> dict[str, Any] | None:
+    doc = _client().collection("worldmonitor_cache").document(_safe_doc_id(key)).get()
+    if not doc.exists:
+        return None
+    data = doc.to_dict() or {}
+    return {"data": data.get("payload"), "fetched_at": data.get("fetched_at")}
+
+
+def _lock_for_key(key: str) -> Lock:
+    with _READ_FETCH_LOCKS_LOCK:
+        lock = _READ_FETCH_LOCKS.get(key)
+        if lock is None:
+            lock = Lock()
+            _READ_FETCH_LOCKS[key] = lock
+        return lock
 
 
 def db_read(key: str) -> Any | None:
     """Read a cached payload. Returns None if not found."""
-    now = time.monotonic()
-    stale_payload: dict[str, Any] | None = None
-    with _READ_CACHE_LOCK:
-        cached = _READ_CACHE.get(key)
-        if cached:
-            stale_payload = cached[1]
-        if cached and cached[0] > now:
-            return cached[1]
-    try:
-        doc = _client().collection("worldmonitor_cache").document(_safe_doc_id(key)).get()
-        if not doc.exists:
-            return None
-        data = doc.to_dict() or {}
-        payload = {"data": data.get("payload"), "fetched_at": data.get("fetched_at")}
-        with _READ_CACHE_LOCK:
-            _READ_CACHE[key] = (now + _READ_CACHE_TTL_SECONDS, payload)
-        return payload
-    except Exception:
-        # If Firestore read fails, serve last known payload instead of dropping data to empty.
-        if stale_payload is not None:
+    fresh, stale_payload = _get_l1_cache(key)
+    if fresh is not None:
+        return fresh
+
+    redis_payload = _redis_get_payload(key)
+    if redis_payload is not None:
+        _set_l1_cache(key, redis_payload)
+        return redis_payload
+
+    lock = _lock_for_key(key)
+    with lock:
+        fresh, stale_payload = _get_l1_cache(key)
+        if fresh is not None:
+            return fresh
+        redis_payload = _redis_get_payload(key)
+        if redis_payload is not None:
+            _set_l1_cache(key, redis_payload)
+            return redis_payload
+
+        client, lock_token = _redis_acquire_lock(key)
+        if client is not None and lock_token is None:
+            deadline = time.monotonic() + _REDIS_LOCK_WAIT_SECONDS
+            while time.monotonic() < deadline:
+                time.sleep(0.1)
+                redis_payload = _redis_get_payload(key)
+                if redis_payload is not None:
+                    _set_l1_cache(key, redis_payload)
+                    return redis_payload
+
+        try:
+            payload = _read_from_firestore(key)
+            if payload is None:
+                return stale_payload
+            _set_l1_cache(key, payload)
+            _redis_set_payload(key, payload)
+            return payload
+        except Exception:
+            # If Firestore read fails, serve last known payload instead of dropping data to empty.
             return stale_payload
-        return None
+        finally:
+            if client is not None and lock_token:
+                _redis_release_lock(client, key, lock_token)
 
 
 def db_read_all_by_table(table: str) -> list[dict]:
@@ -197,21 +372,27 @@ def db_read_many(keys: list[str]) -> dict[str, dict[str, Any] | None]:
     Read multiple cached payloads with a single Firestore round-trip when possible.
     Falls back to per-key reads for local SQLite or unsupported clients.
     """
-    now = time.monotonic()
     result: dict[str, dict[str, Any] | None] = {}
     stale_payloads: dict[str, dict[str, Any]] = {}
     misses: list[str] = []
 
-    with _READ_CACHE_LOCK:
-        for key in keys:
-            cached = _READ_CACHE.get(key)
-            if cached:
-                stale_payloads[key] = cached[1]
-                if cached[0] > now:
-                    result[key] = cached[1]
-                    continue
-            misses.append(key)
+    for key in keys:
+        fresh, stale = _get_l1_cache(key)
+        if stale is not None:
+            stale_payloads[key] = stale
+        if fresh is not None:
+            result[key] = fresh
+            continue
+        misses.append(key)
 
+    if not misses:
+        return result
+
+    redis_rows = _redis_get_many_payloads(misses)
+    for key, payload in redis_rows.items():
+        result[key] = payload
+        _set_l1_cache(key, payload)
+    misses = [key for key in misses if key not in redis_rows]
     if not misses:
         return result
 
@@ -222,13 +403,13 @@ def db_read_many(keys: list[str]) -> dict[str, dict[str, Any] | None]:
             docs = list(client.get_all(refs))
             for key, doc in zip(misses, docs):
                 if not doc.exists:
-                    result[key] = None
+                    result[key] = stale_payloads.get(key)
                     continue
                 data = doc.to_dict() or {}
                 payload = {"data": data.get("payload"), "fetched_at": data.get("fetched_at")}
                 result[key] = payload
-                with _READ_CACHE_LOCK:
-                    _READ_CACHE[key] = (now + _READ_CACHE_TTL_SECONDS, payload)
+                _set_l1_cache(key, payload)
+                _redis_set_payload(key, payload)
         else:
             for key in misses:
                 result[key] = db_read(key)
@@ -1158,6 +1339,12 @@ def get_worldmonitor_bundle_snapshot() -> dict[str, Any]:
     Optimized multi-key read for dashboard/summary endpoints.
     Reduces repeated Firestore document reads during one API request.
     """
+    cached_bundle = db_read(_WORLDMONITOR_BUNDLE_KEY)
+    if isinstance(cached_bundle, dict):
+        bundle_payload = cached_bundle.get("data")
+        if isinstance(bundle_payload, dict):
+            return bundle_payload
+
     keys = [
         "eonet_events",
         "usgs_earthquakes",
@@ -1190,7 +1377,7 @@ def get_worldmonitor_bundle_snapshot() -> dict[str, Any]:
         "scored_chokepoints",
         [{**cp, "risk_score": cp["traffic_pct"], "trend": "stable"} for cp in CHOKEPOINTS],
     )
-    return {
+    bundle = {
         "hazards": _data("eonet_events", []),
         "earthquakes": _data("usgs_earthquakes", []),
         "conflict": _data("acled_events", []),
@@ -1212,3 +1399,5 @@ def get_worldmonitor_bundle_snapshot() -> dict[str, Any]:
         "shipping_indices": SHIPPING_INDICES,
         "shipping_rates": _data("shipping_rates_v2", {"indices": SHIPPING_INDICES, "fetched_at": "", "upstream_unavailable": True}),
     }
+    _db_upsert("worldmonitor_bundle", _WORLDMONITOR_BUNDLE_KEY, bundle)
+    return bundle

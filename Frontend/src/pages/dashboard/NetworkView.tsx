@@ -1234,7 +1234,6 @@ const ptCssStatic = { fontSize: 11, fontWeight: 700, letterSpacing: "0.12em", co
 const pbCssStatic = { padding: "12px", flex: 1, display: "flex", flexDirection: "column" as const, overflowY: "auto" as const, background: "var(--bg,#f8f9fa)" };
 const thStatic = { padding: "8px 6px", fontSize: 10, color: "var(--text-muted,#737373)", textTransform: "uppercase" as const, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "var(--font-headline)", borderBottom: "1px solid var(--panel-border,#d4d4d4)", whiteSpace: "nowrap" as const };
 const tdStatic = { padding: "8px 6px", borderBottom: "1px solid var(--border-subtle,#e5e5e5)", verticalAlign: "middle" };
-const GLOBAL_BUNDLE_REFETCH_MS = 300_000;
 const NETWORK_VIEW_CACHE_PREFIX = "network-view-cache:v1";
 
 function readSessionCache<T>(cacheKey: string): T | undefined {
@@ -1299,8 +1298,7 @@ function useGlobalDashboardBundle() {
     cacheKey: "global-dashboard-bundle",
     queryKey: ["globalDashboardBundle"],
     queryFn: () => api.global.dashboardBundle(),
-    refetchInterval: GLOBAL_BUNDLE_REFETCH_MS,
-    staleTime: 30_000,
+    staleTime: 5 * 60 * 1000,
     shouldCache: (bundle) => Boolean(bundle?.generated_at && bundle?.summary),
   });
 }
@@ -1847,11 +1845,11 @@ export default function NetworkView() {
   const [selectedCountry, setSelectedCountry] = useState<string | null>(null);
 
   /* ── Data queries ───────────────────────────────────────────── */
-  const { data: suppRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-suppliers", queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000, refetchInterval:120000 });
-  const { data: evtsRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-events", queryKey:["risks","events"], queryFn:()=>api.risks.events(), staleTime:120_000, refetchInterval:120000 });
+  const { data: suppRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-suppliers", queryKey:["risks","suppliers"], queryFn:()=>api.risks.suppliers(), staleTime:300_000 });
+  const { data: evtsRaw = [] }  = useSessionCachedQuery({ cacheKey: "risk-events", queryKey:["risks","events"], queryFn:()=>api.risks.events(), staleTime:120_000 });
   const { data: globalBundle }  = useGlobalDashboardBundle();
-  const { data: auditList=[] }  = useSessionCachedQuery({ cacheKey: "audit-list", queryKey:["audit","list"], queryFn:()=>api.audit.list(), staleTime:300_000, refetchInterval:120000 });
-  const { data: gapReport }     = useSessionCachedQuery({ cacheKey: "intel-gaps", queryKey:["intel","gaps"], queryFn:()=>api.intelligence.gaps(), staleTime:120_000, refetchInterval:120000 });
+  const { data: auditList=[] }  = useSessionCachedQuery({ cacheKey: "audit-list", queryKey:["audit","list"], queryFn:()=>api.audit.list(), staleTime:300_000 });
+  const { data: gapReport }     = useSessionCachedQuery({ cacheKey: "intel-gaps", queryKey:["intel","gaps"], queryFn:()=>api.intelligence.gaps(), staleTime:120_000 });
 
   /* ── User Context (Logistics Nodes) ────────────────────────── */
   const userId = useMemo(() => getUserId(), []);

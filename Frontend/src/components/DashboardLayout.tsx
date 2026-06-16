@@ -188,7 +188,7 @@ const DashboardLayout = () => {
   const { data: incidentSummary } = useQuery({
     queryKey: ["incident-summary-nav"],
     queryFn: api.incidents.summary,
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
     enabled: hasToken,
   });
 
@@ -243,7 +243,7 @@ const DashboardLayout = () => {
       if (!r.ok) return { count: 0, pending: [] };
       return r.json();
     },
-    refetchInterval: 60_000,
+    staleTime: 15 * 60 * 1000,
     enabled: hasToken,
   });
 
@@ -544,7 +544,7 @@ const DashboardLayout = () => {
             <div className="flex items-center gap-2">
               <div className={`w-1.5 h-1.5 ${wsConnected ? "bg-green-500" : "bg-amber-500"} animate-pulse`} />
               <span className="text-[10px] font-headline font-bold uppercase tracking-[0.1em] text-slate-600">
-                {wsConnected ? "Live" : "Polling"} · {totalNodes.toLocaleString()} nodes
+                {wsConnected ? "Live" : "Cached"} · {totalNodes.toLocaleString()} nodes
               </span>
               {wsConnected && <Wifi size={10} className="text-green-500" />}
             </div>
@@ -645,7 +645,7 @@ const DashboardLayout = () => {
                   <div className="flex items-center gap-1.5">
                     <Clock size={10} className="text-muted-foreground/50" />
                     <span className="text-[10px] text-muted-foreground/50 font-headline font-bold uppercase tracking-wider">
-                      {wsConnected ? "Live updates on" : "Polling every 30 s"}
+                      {wsConnected ? "Live updates on" : "Auto refresh on demand"}
                     </span>
                   </div>
                   <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />

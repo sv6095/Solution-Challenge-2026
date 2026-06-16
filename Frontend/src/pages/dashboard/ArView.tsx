@@ -20,8 +20,7 @@ export default function ArView() {
   const { data, isLoading, isError, refetch, isFetching } = useQuery({
     queryKey: ["ar", "assets"],
     queryFn: api.ar.assets,
-    staleTime: 30_000,
-    refetchInterval: 30_000,
+    staleTime: 15 * 60 * 1000,
   });
 
   const { data: mapsConfig } = useQuery({
