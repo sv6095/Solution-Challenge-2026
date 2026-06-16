@@ -41,7 +41,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       CACHE_PROVIDER: redis
       LOCAL_DB_PATH: /app/data/local_fallback.db
-      ENABLE_IN_PROCESS_SCHEDULERS: "true"
+      ENABLE_IN_PROCESS_SCHEDULERS: "false"
     volumes:
       - ./secrets/gcp-sa.json:/secrets/gcp-sa.json:ro
       - backend-data:/app/data
