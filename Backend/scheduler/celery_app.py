@@ -22,9 +22,9 @@ celery_app.conf.update(
     result_expires=86400,
     # Celery Beat config for distributed autonomous execution
     beat_schedule={
-        "poll-signals-every-10-minutes": {
+        "poll-signals-every-20-minutes": {
             "task": "scheduler.tasks.poll_signals",
-            "schedule": float(os.getenv("SIGNAL_POLL_INTERVAL_SECONDS", "600")),
+            "schedule": float(os.getenv("SIGNAL_POLL_INTERVAL_SECONDS", "1200")),
         },
         "refresh-worldmonitor-every-15-minutes": {
             "task": "scheduler.tasks.refresh_worldmonitor",
