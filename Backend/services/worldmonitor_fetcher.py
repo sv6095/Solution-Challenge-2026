@@ -1244,10 +1244,14 @@ async def worldmonitor_cron_loop():
 
     # Initial warm-up: run all on startup
     await run_all_fetchers_once()
+    now_startup = time.monotonic()
+    for fn, _, _ in FETCH_SCHEDULE:
+        _last_run[fn.__name__] = now_startup
 
     while True:
         await asyncio.sleep(60)  # check every minute
         now = time.monotonic()
+        run_fetchers = []
         for fn, interval_minutes, desc in FETCH_SCHEDULE:
             fn_key = fn.__name__
             last = _last_run.get(fn_key, 0)
@@ -1255,11 +1259,19 @@ async def worldmonitor_cron_loop():
                 _last_run[fn_key] = now
                 try:
                     await fn()
-                    # Broadcast to let frontend know data has changed!
-                    from services.event_bus import broadcast_all
-                    await broadcast_all("worldmonitor_updated", {"fetcher": fn_key})
+                    run_fetchers.append(fn_key)
                 except Exception as e:
                     logger.error(f"[worldmonitor] {desc} cron failed: {e}")
+
+        if run_fetchers:
+            try:
+                from services.event_bus import broadcast_all
+                # New batch event
+                await broadcast_all("worldmonitor_updated_batch", {"fetchers": run_fetchers})
+                # Legacy event for compatibility (e.g., ArView.tsx)
+                await broadcast_all("worldmonitor_updated", {"fetcher": "batch"})
+            except Exception as e:
+                logger.error(f"[worldmonitor] failed to broadcast batch update: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

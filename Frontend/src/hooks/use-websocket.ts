@@ -202,6 +202,16 @@ export function useWSQueryInvalidation(
 ) {
   const { lastEvent, isConnected } = useWebSocket(tenantId);
   const pendingKeysRef = useRef<Set<string>>(new Set());
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!lastEvent) return;
@@ -210,6 +220,7 @@ export function useWSQueryInvalidation(
     const invalidationMap: Record<string, string[][]> = {
       incident_created: [
         ["incidents"],
+        ["intelligence", "simulation-incidents"],
         ["dashboard", "kpis"],
         ["command"],
         ["risks", "events"],
@@ -217,6 +228,7 @@ export function useWSQueryInvalidation(
       ],
       incident_updated: [
         ["incidents"],
+        ["intelligence", "simulation-incidents"],
         ["dashboard", "kpis"],
         ["command"],
         ["risks", "events"],
@@ -224,6 +236,7 @@ export function useWSQueryInvalidation(
       ],
       incident_resolved: [
         ["incidents"],
+        ["intelligence", "simulation-incidents"],
         ["dashboard", "kpis"],
         ["command"],
         ["risks", "events"],
@@ -237,12 +250,13 @@ export function useWSQueryInvalidation(
       threshold_tuned: [["governance", "thresholds"]],
       signal_detected: [
         ["signals"],
+        ["signals", "categorized"],
         ["dashboard", "events"],
         ["risks", "events"],
         ["g"]
       ],
       rfq_sent: [["rfq"]],
-      worldmonitor_updated: [
+      worldmonitor_updated_batch: [
         ["globalDashboardBundle"],
         ["g"],
         ["marketImplications"],
@@ -264,7 +278,11 @@ export function useWSQueryInvalidation(
         pendingKeysRef.current.add(JSON.stringify(queryKey));
       });
 
-      const timer = setTimeout(() => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+      }
+
+      debounceRef.current = setTimeout(() => {
         pendingKeysRef.current.forEach((serializedKey) => {
           try {
             const queryKey = JSON.parse(serializedKey);
@@ -274,9 +292,8 @@ export function useWSQueryInvalidation(
           }
         });
         pendingKeysRef.current.clear();
+        debounceRef.current = null;
       }, 1000);
-
-      return () => clearTimeout(timer);
     }
   }, [lastEvent, queryClient]);
 
