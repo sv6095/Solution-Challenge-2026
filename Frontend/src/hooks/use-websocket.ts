@@ -201,6 +201,7 @@ export function useWSQueryInvalidation(
   queryClient: { invalidateQueries: (opts: { queryKey: string[] }) => void },
 ) {
   const { lastEvent, isConnected } = useWebSocket(tenantId);
+  const pendingKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!lastEvent) return;
@@ -259,7 +260,23 @@ export function useWSQueryInvalidation(
 
     const keys = invalidationMap[lastEvent.type];
     if (keys) {
-      keys.forEach((queryKey) => queryClient.invalidateQueries({ queryKey }));
+      keys.forEach((queryKey) => {
+        pendingKeysRef.current.add(JSON.stringify(queryKey));
+      });
+
+      const timer = setTimeout(() => {
+        pendingKeysRef.current.forEach((serializedKey) => {
+          try {
+            const queryKey = JSON.parse(serializedKey);
+            queryClient.invalidateQueries({ queryKey });
+          } catch (e) {
+            console.error(e);
+          }
+        });
+        pendingKeysRef.current.clear();
+      }, 1000);
+
+      return () => clearTimeout(timer);
     }
   }, [lastEvent, queryClient]);
 

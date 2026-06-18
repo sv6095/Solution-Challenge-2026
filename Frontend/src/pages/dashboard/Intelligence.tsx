@@ -56,7 +56,7 @@ const Intelligence = () => {
   const qc = useQueryClient();
   const navigate = useNavigate();
 
-  const { data: categorized = {} } = useQuery({
+  const { data: categorized = {}, isLoading: isSignalsLoading } = useQuery({
     queryKey: ["signals", "categorized"],
     queryFn: api.signals.categorized,
     staleTime: 15 * 60 * 1000,
@@ -213,12 +213,17 @@ const Intelligence = () => {
 
             {/* Signal list */}
             <div className="w-[420px] shrink-0 border-r border-slate-200/60 overflow-y-auto custom-scrollbar divide-y divide-slate-200/60">
-              {filteredSignals.length === 0 && (
+              {isSignalsLoading ? (
+                <div className="p-8 text-center text-slate-400 font-mono text-sm font-medium flex flex-col items-center justify-center gap-2">
+                  <Loader2 size={24} className="animate-spin text-slate-400 mb-1" />
+                  Loading signals...
+                </div>
+              ) : filteredSignals.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 font-mono text-sm font-medium">
                   No signals. Click Refresh to scan sources.
                 </div>
-              )}
-              {filteredSignals.map((sig, i) => (
+              ) : null}
+              {!isSignalsLoading && filteredSignals.map((sig, i) => (
                 <button
                   type="button"
                   key={i}

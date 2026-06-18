@@ -202,16 +202,17 @@ const Incidents = () => {
   const activeStatuses = ["DETECTED", "ANALYZED", "AWAITING_APPROVAL"];
   const fetchStatusParam = statusFilter === "ACTIVE" ? undefined : (statusFilter || undefined);
 
-  const { data: incidentsRaw = [] } = useQuery({
+  const { data: incidentsRaw = [], isLoading: isIncidentsLoading } = useQuery({
     queryKey: ["incidents", statusFilter],
     queryFn: () => fetchIncidents(fetchStatusParam),
     staleTime: 15 * 60 * 1000,
   });
-  const { data: simulationIncidentsRaw = [] } = useQuery({
+  const { data: simulationIncidentsRaw = [], isLoading: isSimulationLoading } = useQuery({
     queryKey: ["intelligence", "simulation-incidents", statusFilter],
     queryFn: () => fetchSimulationIncidents(fetchStatusParam),
     staleTime: 15 * 60 * 1000,
   });
+  const isLoading = isIncidentsLoading || isSimulationLoading;
 
   const incidentsAll: Record<string, unknown>[] = useMemo(() => {
     const base = Array.isArray(incidentsRaw) ? incidentsRaw as Record<string, unknown>[] : [];
@@ -410,14 +411,19 @@ const Incidents = () => {
 
         {/* List */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
-          {incidents.length === 0 && (
+          {isLoading ? (
+            <div className="p-10 text-center text-slate-400 text-xs font-mono font-medium flex flex-col items-center justify-center gap-2">
+              <Loader2 size={24} className="animate-spin text-slate-400 mb-1" />
+              Loading incidents...
+            </div>
+          ) : incidents.length === 0 ? (
             <div className="p-10 text-center text-slate-400 text-xs font-mono font-medium">
               <AlertTriangle size={24} className="mx-auto mb-3 opacity-30" />
               No incidents found.
             </div>
-          )}
+          ) : null}
           <AnimatePresence>
-            {incidents.map((incident: any) => (
+            {!isLoading && incidents.map((incident: any) => (
               <IncidentCard
                 key={String(incident.id)}
                 incident={incident}
