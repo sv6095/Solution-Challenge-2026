@@ -678,6 +678,7 @@ def replace_active_signals(items: list[dict[str, Any]]) -> None:
     incoming_hashes: dict[str, str] = {}
     
     volatile_keys = {"created_at", "updated_at", "last_seen", "ingested_at"}
+    stats = {"incoming": len(items), "archived": 0, "skipped": 0, "updated": 0, "new": 0}
     
     for item in items:
         signal_id = str(item.get("id") or item.get("signal_id") or "").strip()
@@ -720,6 +721,7 @@ def replace_active_signals(items: list[dict[str, Any]]) -> None:
         for doc_id in stale_ids:
             doc = db.collection("signals").document(doc_id).get()
             if doc.exists:
+                stats["archived"] += 1
                 data = doc.to_dict() or {}
                 archived_id = f"{doc_id}_{hashlib.sha256(now.encode('utf-8')).hexdigest()[:8]}"
                 batch.set(db.collection("signals_archive").document(archived_id), {**data, "archived_at": now}, merge=True)
@@ -733,6 +735,7 @@ def replace_active_signals(items: list[dict[str, Any]]) -> None:
         
         # Skip writes for unchanged payloads
         if redis_client and stored_hashes.get(doc_id) == new_hash:
+            stats["skipped"] += 1
             continue
             
         # Update existing vs insert new
@@ -744,14 +747,18 @@ def replace_active_signals(items: list[dict[str, Any]]) -> None:
         write_payload = dict(payload)
         
         if is_existing:
+            stats["updated"] += 1
             # Pop created_at to avoid rewriting it
             write_payload.pop("created_at", None)
             batch.set(db.collection("signals").document(doc_id), {"signal_id": signal_id, "payload": write_payload}, merge=True)
         else:
+            stats["new"] += 1
             write_payload["created_at"] = write_payload.get("created_at") or now
             batch.set(db.collection("signals").document(doc_id), {"signal_id": signal_id, "payload": write_payload, "created_at": write_payload["created_at"]}, merge=True)
             
     batch.commit()
+    logger.info("replace_active_signals complete: %d incoming, %d archived, %d skipped, %d updated, %d new", 
+                stats["incoming"], stats["archived"], stats["skipped"], stats["updated"], stats["new"])
 
     if redis_client:
         try:
