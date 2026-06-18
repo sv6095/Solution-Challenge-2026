@@ -102,12 +102,15 @@ async def cache_set(key: str, value: Any, ttl_seconds: int = 1800) -> None:
         client = await _get_redis_client()
         if client is not None:
             try:
-                payload = json.dumps(value) if not isinstance(value, (str, bytes)) else value
+                from fastapi.encoders import jsonable_encoder
+                payload = json.dumps(jsonable_encoder(value)) if not isinstance(value, (str, bytes)) else value
                 await client.set(key, payload, ex=ttl_seconds if ttl_seconds > 0 else None)
                 # Fire Firestore write in the background — don't block the response.
                 _asyncio.ensure_future(_background_firestore_write())
                 return
-            except Exception:
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning("Redis cache_set failed for key %s: %s", key, e)
                 pass
         # Redis unavailable — fall through to in-memory + Firestore.
         _memory_set(key, value, ttl_seconds)

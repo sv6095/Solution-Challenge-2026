@@ -12,6 +12,7 @@ from google.cloud import firestore as g_firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from pathlib import Path
 import logging
+logger = logging.getLogger(__name__)
 
 from services.event_freshness import is_incident_fresh
 
@@ -398,6 +399,23 @@ def _should_use_local() -> bool:
 
 _FIRESTORE_CLIENT: g_firestore.Client | None = None
 _FIRESTORE_CLIENT_LOCK = Lock()
+_SYNC_REDIS_CLIENT = None
+
+
+def _get_sync_redis():
+    global _SYNC_REDIS_CLIENT
+    if _SYNC_REDIS_CLIENT is not None:
+        return _SYNC_REDIS_CLIENT
+    try:
+        import redis
+        url = (os.getenv("REDIS_URL") or "redis://localhost:6379/0").strip()
+        _SYNC_REDIS_CLIENT = redis.from_url(url, decode_responses=True)
+        _SYNC_REDIS_CLIENT.ping()
+        return _SYNC_REDIS_CLIENT
+    except Exception as exc:
+        logger.warning("Failed to initialize sync Redis client: %s", exc)
+        _SYNC_REDIS_CLIENT = None  # Leave as None to allow retrying on the next poll
+        return None
 
 
 def _client() -> g_firestore.Client:
@@ -657,23 +675,99 @@ def replace_active_signals(items: list[dict[str, Any]]) -> None:
     db = _client()
     now = _now()
     incoming: dict[str, dict[str, Any]] = {}
+    incoming_hashes: dict[str, str] = {}
+    
+    volatile_keys = {"created_at", "updated_at", "last_seen", "ingested_at"}
+    
     for item in items:
         signal_id = str(item.get("id") or item.get("signal_id") or "").strip()
         if not signal_id:
             basis = f"{item.get('source','')}|{item.get('title','')}|{item.get('location','')}|{item.get('created_at','')}"
             signal_id = f"sig_{hashlib.sha256(basis.encode('utf-8')).hexdigest()[:16]}"
         incoming[signal_id] = item
+        
+        # Deterministic hashing excluding volatile fields
+        payload_for_hash = {k: v for k, v in item.items() if k not in volatile_keys}
+        payload_str = json.dumps(payload_for_hash, sort_keys=True, separators=(",", ":"))
+        incoming_hashes[_safe_doc_id(signal_id)] = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
+
     batch = db.batch()
-    existing = {doc.id: (doc.to_dict() or {}) for doc in db.collection("signals").stream()}
-    incoming_doc_ids = {_safe_doc_id(k) for k in incoming}
-    for doc_id, data in existing.items():
-        if doc_id not in incoming_doc_ids:
-            archived_id = f"{doc_id}_{hashlib.sha256(now.encode('utf-8')).hexdigest()[:8]}"
-            batch.set(db.collection("signals_archive").document(archived_id), {**data, "archived_at": now}, merge=True)
-            batch.delete(db.collection("signals").document(doc_id))
+    incoming_doc_ids_list = [_safe_doc_id(k) for k in incoming]
+    incoming_doc_ids_set = set(incoming_doc_ids_list)
+    
+    redis_client = _get_sync_redis()
+    cached_ids = set()
+    stored_hashes = {}
+    
+    if redis_client:
+        try:
+            members = redis_client.smembers("active_signal_ids")
+            if members:
+                cached_ids = set(members)
+                
+            if incoming_doc_ids_list:
+                keys = [f"signal_hash:{doc_id}" for doc_id in incoming_doc_ids_list]
+                hash_vals = redis_client.mget(keys)
+                for doc_id, hval in zip(incoming_doc_ids_list, hash_vals):
+                    if hval:
+                        stored_hashes[doc_id] = hval
+        except Exception as exc:
+            logger.warning("Redis operation failed in replace_active_signals: %s", exc)
+            redis_client = None
+
+    if redis_client:
+        stale_ids = cached_ids - incoming_doc_ids_set
+        for doc_id in stale_ids:
+            doc = db.collection("signals").document(doc_id).get()
+            if doc.exists:
+                data = doc.to_dict() or {}
+                archived_id = f"{doc_id}_{hashlib.sha256(now.encode('utf-8')).hexdigest()[:8]}"
+                batch.set(db.collection("signals_archive").document(archived_id), {**data, "archived_at": now}, merge=True)
+                batch.delete(db.collection("signals").document(doc_id))
+    else:
+        logger.warning("Skipping archive reconciliation because Redis is unavailable")
+
     for signal_id, payload in incoming.items():
-        batch.set(db.collection("signals").document(_safe_doc_id(signal_id)), {"signal_id": signal_id, "payload": payload, "created_at": now}, merge=True)
+        doc_id = _safe_doc_id(signal_id)
+        new_hash = incoming_hashes[doc_id]
+        
+        # Skip writes for unchanged payloads
+        if redis_client and stored_hashes.get(doc_id) == new_hash:
+            continue
+            
+        # Update existing vs insert new
+        is_existing = doc_id in cached_ids or doc_id in stored_hashes
+        
+        if not redis_client:
+            is_existing = db.collection("signals").document(doc_id).get().exists
+
+        write_payload = dict(payload)
+        
+        if is_existing:
+            # Pop created_at to avoid rewriting it
+            write_payload.pop("created_at", None)
+            batch.set(db.collection("signals").document(doc_id), {"signal_id": signal_id, "payload": write_payload}, merge=True)
+        else:
+            write_payload["created_at"] = write_payload.get("created_at") or now
+            batch.set(db.collection("signals").document(doc_id), {"signal_id": signal_id, "payload": write_payload, "created_at": write_payload["created_at"]}, merge=True)
+            
     batch.commit()
+
+    if redis_client:
+        try:
+            pipe = redis_client.pipeline()
+            temp_key = f"active_signal_ids_tmp_{uuid4().hex[:8]}"
+            if incoming_doc_ids_list:
+                pipe.sadd(temp_key, *incoming_doc_ids_list)
+                pipe.rename(temp_key, "active_signal_ids")
+            else:
+                pipe.delete("active_signal_ids")
+            
+            for doc_id, new_hash in incoming_hashes.items():
+                pipe.set(f"signal_hash:{doc_id}", new_hash, ex=2592000) # 30 days TTL for hashes
+            pipe.execute()
+        except Exception as exc:
+            logger.warning("Failed to update Redis cache for active signals: %s", exc)
 
 
 def purge_archived_signals(days: int = 7) -> int:

@@ -92,6 +92,10 @@ def init_local_store() -> None:
             )
             """
         )
+        try:
+            con.execute("ALTER TABLE signals ADD COLUMN payload_hash TEXT")
+        except Exception:
+            pass
         con.execute(
             """
             CREATE TABLE IF NOT EXISTS signals_archive (
@@ -587,16 +591,25 @@ def list_signals(limit: int = 50) -> list[dict[str, Any]]:
 def replace_active_signals(items: list[dict[str, Any]]) -> None:
     now = datetime.now(timezone.utc).isoformat()
     deduped: dict[str, dict[str, Any]] = {}
+    incoming_hashes: dict[str, str] = {}
+    volatile_keys = {"created_at", "updated_at", "last_seen", "ingested_at"}
+    
     for item in items:
         signal_id = str(item.get("id") or item.get("signal_id") or "").strip()
         if not signal_id:
             basis = f"{item.get('source','')}|{item.get('title','')}|{item.get('location','')}|{item.get('created_at','')}"
             signal_id = f"sig_{hashlib.sha256(basis.encode('utf-8')).hexdigest()[:16]}"
         deduped[signal_id] = item
+        
+        payload_for_hash = {k: v for k, v in item.items() if k not in volatile_keys}
+        payload_str = json.dumps(payload_for_hash, sort_keys=True, separators=(",", ":"))
+        incoming_hashes[signal_id] = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
 
     with _conn() as con:
-        existing_rows = con.execute("SELECT signal_id, payload_json, created_at FROM signals").fetchall()
-        existing_ids = {row[0] for row in existing_rows}
+        # Include payload_hash in the query. For backwards compatibility, it might be NULL.
+        existing_rows = con.execute("SELECT signal_id, created_at, payload_hash FROM signals").fetchall()
+        existing_info = {row[0]: {"created_at": row[1], "payload_hash": row[2]} for row in existing_rows}
+        existing_ids = set(existing_info.keys())
         incoming_ids = set(deduped.keys())
 
         stale_ids = existing_ids - incoming_ids
@@ -613,9 +626,20 @@ def replace_active_signals(items: list[dict[str, Any]]) -> None:
             con.execute(f"DELETE FROM signals WHERE signal_id IN ({placeholders})", tuple(stale_ids))
 
         for signal_id, payload in deduped.items():
+            new_hash = incoming_hashes[signal_id]
+            old_info = existing_info.get(signal_id)
+            
+            if old_info is not None:
+                old_hash = old_info.get("payload_hash")
+                if old_hash is not None and old_hash == new_hash:
+                    continue  # Skip unchanged signals
+                created_at = old_info.get("created_at") or now
+            else:
+                created_at = payload.get("created_at") or now
+
             con.execute(
-                "INSERT OR REPLACE INTO signals(signal_id, payload_json, created_at) VALUES(?, ?, ?)",
-                (signal_id, json.dumps(payload), now),
+                "INSERT OR REPLACE INTO signals(signal_id, payload_json, created_at, payload_hash) VALUES(?, ?, ?, ?)",
+                (signal_id, json.dumps(payload), created_at, new_hash),
             )
 
     try:
