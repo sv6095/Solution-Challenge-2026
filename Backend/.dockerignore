@@ -23,7 +23,6 @@ secrets/
 # ── Dev / test / dataset artefacts ───────────────────────────────────────────
 scratch/
 tests/
-Dataset/
 docs/
 
 # ── Temporary and generated files ────────────────────────────────────────────

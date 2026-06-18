@@ -21,6 +21,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
+from starlette.concurrency import run_in_threadpool
 from starlette.responses import Response
 
 # Load env: base .env
@@ -3982,11 +3983,12 @@ async def api_intelligence_monte_carlo(
     tenant_id = _safe_resource_tenant(user_id)
     _require_incident_permission(user, Permission.WORKFLOW_TRIGGER, tenant_id)
 
-    fs = read_context(user_id)
+    fs = await run_in_threadpool(read_context, user_id)
     if isinstance(fs, dict) and fs:
         context = dict(fs)
     else:
-        row = get_context(user_id) or {}
+        row = await run_in_threadpool(get_context, user_id)
+        row = row or {}
         try:
             context = json.loads(row.get("payload_json") or "{}") if isinstance(row, dict) else {}
         except Exception:
@@ -3994,7 +3996,10 @@ async def api_intelligence_monte_carlo(
 
     dq = assess_context_quality(context)
 
-    suppliers = _context_suppliers(user_id)
+    try:
+        suppliers = _context_suppliers(user_id)
+    except HTTPException:
+        suppliers = _dataset_suppliers(limit=100)
     signal = dict(payload.signal or {})
     signal_id = str(signal.get("id") or signal.get("signal_id") or "").strip()
     if not signal:
@@ -4013,7 +4018,7 @@ async def api_intelligence_monte_carlo(
         first_summary = incident_summaries[0]
         if isinstance(first_summary, dict):
             incident_id = str(first_summary.get("id") or "").strip()
-    incident = get_incident(incident_id, tenant_id=tenant_id) if incident_id else None
+    incident = await run_in_threadpool(get_incident, incident_id, tenant_id=tenant_id) if incident_id else None
     if not incident:
         raise HTTPException(
             status_code=500,
@@ -4047,7 +4052,7 @@ async def api_intelligence_monte_carlo(
             first_probe = probe_summaries[0]
             if isinstance(first_probe, dict):
                 probe_incident_id = str(first_probe.get("id") or "").strip()
-        probe_incident = get_incident(probe_incident_id, tenant_id=tenant_id) if probe_incident_id else None
+        probe_incident = await run_in_threadpool(get_incident, probe_incident_id, tenant_id=tenant_id) if probe_incident_id else None
         if probe_incident:
             probe_incident["synthetic_probe_used"] = True
             probe_incident["synthetic_probe_supplier"] = synthetic_probe
@@ -4070,7 +4075,8 @@ async def api_intelligence_monte_carlo(
             )
             simulation = simulate_incident_monte_carlo(probe_incident, signal, runs=payload.runs)
             probe_incident["monte_carlo"] = simulation
-            upsert_incident(
+            await run_in_threadpool(
+                upsert_incident,
                 str(probe_incident.get("id") or ""),
                 probe_incident,
                 str(probe_incident.get("status") or "ANALYZED"),
@@ -4101,7 +4107,8 @@ async def api_intelligence_monte_carlo(
     simulation = simulate_incident_monte_carlo(incident, signal, runs=payload.runs)
     incident["monte_carlo"] = simulation
 
-    upsert_incident(
+    await run_in_threadpool(
+        upsert_incident,
         str(incident.get("id") or ""),
         incident,
         str(incident.get("status") or "ANALYZED"),

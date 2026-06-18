@@ -14,7 +14,7 @@ from xgboost import XGBRegressor
 
 ROOT = Path(__file__).resolve().parents[1]
 DATASET = ROOT / "Dataset" / "Predective_Forecasting.csv"
-MODEL_PATH = ROOT / "ml" / "ensemble_cost_model.joblib"
+MODEL_PATH = ROOT / "ml" / "xgboost_cost_model.joblib"
 
 EVENT_MAP = {
     "Port Congestion": 0,
