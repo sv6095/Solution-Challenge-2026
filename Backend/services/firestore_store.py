@@ -671,13 +671,28 @@ def list_signals(limit: int = 50) -> list[dict[str, Any]]:
     return [{"signal_id": r.get("signal_id") or r.get("_doc_id"), "payload_json": json.dumps(r.get("payload") or {}), "created_at": r.get("created_at", "")} for r in rows]
 
 
+def _strip_volatile_keys(data: Any, volatile_keys: set[str]) -> Any:
+    if isinstance(data, dict):
+        return {
+            k: _strip_volatile_keys(v, volatile_keys)
+            for k, v in data.items()
+            if k not in volatile_keys
+        }
+    if isinstance(data, list):
+        return [_strip_volatile_keys(x, volatile_keys) for x in data]
+    return data
+
+
 def replace_active_signals(items: list[dict[str, Any]]) -> None:
     db = _client()
     now = _now()
     incoming: dict[str, dict[str, Any]] = {}
     incoming_hashes: dict[str, str] = {}
     
-    volatile_keys = {"created_at", "updated_at", "last_seen", "ingested_at"}
+    volatile_keys = {
+        "created_at", "updated_at", "last_seen", "ingested_at",
+        "retrieved_at", "pipeline_run_id", "last_refresh"
+    }
     stats = {"incoming": len(items), "archived": 0, "skipped": 0, "updated": 0, "new": 0}
     
     for item in items:
@@ -688,7 +703,7 @@ def replace_active_signals(items: list[dict[str, Any]]) -> None:
         incoming[signal_id] = item
         
         # Deterministic hashing excluding volatile fields
-        payload_for_hash = {k: v for k, v in item.items() if k not in volatile_keys}
+        payload_for_hash = _strip_volatile_keys(item, volatile_keys)
         payload_str = json.dumps(payload_for_hash, sort_keys=True, separators=(",", ":"))
         incoming_hashes[_safe_doc_id(signal_id)] = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
 
