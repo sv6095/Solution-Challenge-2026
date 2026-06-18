@@ -13,6 +13,7 @@ import { ReasoningPanel } from "@/components/workflow/ReasoningPanel";
 import { CheckpointBanner } from "@/components/workflow/CheckpointBanner";
 import type { IntelligenceGapItem, RiskEvent } from "@/lib/api";
 import { fmtINR } from "@/lib/currency";
+import { Skeleton } from "@/components/ui/skeleton";
 
 type ViewMode = "feed" | "map";
 
@@ -48,6 +49,28 @@ const SEVERITY: Record<string, { bg: string; text: string; icon: string }> = {
 };
 
 const MODE_ICONS: Record<string, React.ElementType> = { air: Plane, sea: Ship, land: Truck };
+
+const SkeletonList = () => (
+  <div className="divide-y divide-slate-200/60">
+    {Array.from({ length: 3 }).map((_, i) => (
+      <div key={i} className="p-5 space-y-4">
+        <div className="flex gap-3">
+          <Skeleton className="h-5 w-24 rounded shadow-sm" />
+          <Skeleton className="h-5 w-16 rounded" />
+        </div>
+        <div className="space-y-2">
+          <Skeleton className="h-5 w-11/12 rounded" />
+          <Skeleton className="h-4 w-full rounded" />
+          <Skeleton className="h-4 w-10/12 rounded" />
+        </div>
+        <div className="flex gap-4 pt-1">
+          <Skeleton className="h-3.5 w-20 rounded" />
+          <Skeleton className="h-3.5 w-24 rounded" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
 
 const Intelligence = () => {
   const [view, setView] = useState<ViewMode>("feed");
@@ -214,10 +237,7 @@ const Intelligence = () => {
             {/* Signal list */}
             <div className="w-[420px] shrink-0 border-r border-slate-200/60 overflow-y-auto custom-scrollbar divide-y divide-slate-200/60">
               {isSignalsLoading ? (
-                <div className="p-8 text-center text-slate-400 font-mono text-sm font-medium flex flex-col items-center justify-center gap-2">
-                  <Loader2 size={24} className="animate-spin text-slate-400 mb-1" />
-                  Loading signals...
-                </div>
+                <SkeletonList />
               ) : filteredSignals.length === 0 ? (
                 <div className="p-8 text-center text-slate-400 font-mono text-sm font-medium">
                   No signals. Click Refresh to scan sources.

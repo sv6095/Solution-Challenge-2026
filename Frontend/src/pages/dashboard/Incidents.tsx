@@ -12,6 +12,7 @@ import { ReasoningPanel } from "@/components/workflow/ReasoningPanel";
 import { CheckpointBanner } from "@/components/workflow/CheckpointBanner";
 import { GovernanceFeedbackWidget } from "@/components/workflow/GovernanceFeedbackWidget";
 import { motion, AnimatePresence } from "motion/react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const BASE = (import.meta.env.VITE_API_URL ?? "/api").replace(/\/+$/, "");
 
@@ -183,6 +184,28 @@ function IncidentCard({ incident, isSelected, onClick }: { incident: any; isSele
     </motion.div>
   );
 }
+
+const SkeletonList = () => (
+  <div className="divide-y divide-slate-100">
+    {Array.from({ length: 4 }).map((_, i) => (
+      <div key={i} className="p-[14px] px-4 space-y-3">
+        <div className="flex items-center gap-3">
+          <Skeleton className="h-2.5 w-2.5 rounded-full shrink-0" />
+          <Skeleton className="h-4 w-3/4 rounded" />
+        </div>
+        <div className="flex gap-2">
+          <Skeleton className="h-4 w-16 rounded" />
+          <Skeleton className="h-4 w-24 rounded" />
+        </div>
+        <div className="flex justify-between items-center pt-1">
+          <Skeleton className="h-3 w-16 rounded" />
+          <Skeleton className="h-3 w-20 rounded" />
+          <Skeleton className="h-3 w-12 rounded" />
+        </div>
+      </div>
+    ))}
+  </div>
+);
 
 /* ── Main component ─────────────────────────────────────────────────────── */
 const Incidents = () => {
@@ -412,10 +435,7 @@ const Incidents = () => {
         {/* List */}
         <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
           {isLoading ? (
-            <div className="p-10 text-center text-slate-400 text-xs font-mono font-medium flex flex-col items-center justify-center gap-2">
-              <Loader2 size={24} className="animate-spin text-slate-400 mb-1" />
-              Loading incidents...
-            </div>
+            <SkeletonList />
           ) : incidents.length === 0 ? (
             <div className="p-10 text-center text-slate-400 text-xs font-mono font-medium">
               <AlertTriangle size={24} className="mx-auto mb-3 opacity-30" />
