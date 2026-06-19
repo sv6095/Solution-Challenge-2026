@@ -196,44 +196,48 @@ const DashboardLayout = () => {
   useEffect(() => {
     if (!hasToken) return;
     
-    // Command Center
-    queryClient.prefetchQuery({ queryKey: ["command"], queryFn: () => api.incidents.briefing() });
-    
-    // Network View
-    queryClient.prefetchQuery({ queryKey: ["risks", "suppliers"], queryFn: () => api.risks.suppliers() });
-    queryClient.prefetchQuery({ queryKey: ["risks", "events"], queryFn: () => api.risks.events() });
-    
-    // Intelligence
-    queryClient.prefetchQuery({ queryKey: ["signals", "categorized"], queryFn: () => api.signals.categorized() });
+    // Stagger prefetching by 5 seconds to avoid competing with critical Dashboard queries on startup
+    const timer = setTimeout(() => {
+      // Command Center
+      queryClient.prefetchQuery({ queryKey: ["command"], queryFn: () => api.incidents.briefing() });
+      
+      // Network View
+      queryClient.prefetchQuery({ queryKey: ["risks", "suppliers"], queryFn: () => api.risks.suppliers() });
+      queryClient.prefetchQuery({ queryKey: ["risks", "events"], queryFn: () => api.risks.events() });
+      
+      // Intelligence
+      queryClient.prefetchQuery({ queryKey: ["signals", "categorized"], queryFn: () => api.signals.categorized() });
 
-    // Incidents & Compliance
-    queryClient.prefetchQuery({
-      queryKey: ["incidents", "ACTIVE"],
-      queryFn: async () => {
-        const r = await fetch(`${BASE}/incidents`, { headers: authHeaders() });
-        if (!r.ok) throw new Error("Failed to fetch incidents");
-        return r.json();
-      }
-    });
+      // Incidents & Compliance
+      queryClient.prefetchQuery({
+        queryKey: ["incidents", "ACTIVE"],
+        queryFn: async () => {
+          const r = await fetch(`${BASE}/incidents`, { headers: authHeaders() });
+          if (!r.ok) throw new Error("Failed to fetch incidents");
+          return r.json();
+        }
+      });
 
-    queryClient.prefetchQuery({
-      queryKey: ["governance-audit"],
-      queryFn: async () => {
-        const r = await fetch(`${BASE}/audit`, { headers: authHeaders() });
-        if (!r.ok) return [];
-        return r.json();
-      }
-    });
+      queryClient.prefetchQuery({
+        queryKey: ["governance-audit"],
+        queryFn: async () => {
+          const r = await fetch(`${BASE}/audit`, { headers: authHeaders() });
+          if (!r.ok) return [];
+          return r.json();
+        }
+      });
 
-    queryClient.prefetchQuery({
-      queryKey: ["governance-metrics"],
-      queryFn: async () => {
-        const r = await fetch(`${BASE}/governance/summary`, { headers: authHeaders() });
-        if (!r.ok) return {};
-        return r.json();
-      }
-    });
+      queryClient.prefetchQuery({
+        queryKey: ["governance-metrics"],
+        queryFn: async () => {
+          const r = await fetch(`${BASE}/governance/summary`, { headers: authHeaders() });
+          if (!r.ok) return {};
+          return r.json();
+        }
+      });
+    }, 5000);
 
+    return () => clearTimeout(timer);
   }, [hasToken, queryClient]);
 
   const { data: checkpointData } = useQuery({

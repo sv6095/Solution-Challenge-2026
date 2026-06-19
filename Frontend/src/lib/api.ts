@@ -22,7 +22,7 @@ const DISPLAY_NAME_KEY = "display_name";
 const PERSISTENCE_KEY = "auth_persistence";
 /** `local` = backend JWT from email/password; `firebase` = Firebase ID token (e.g. Google sign-in). */
 const AUTH_KIND_KEY = "auth_kind";
-const REQUEST_TIMEOUT_MS = 12_000;
+const REQUEST_TIMEOUT_MS = 30_000;
 const LONG_REQUEST_TIMEOUT_MS = 90_000;
 
 export type AuthKind = "local" | "firebase";
